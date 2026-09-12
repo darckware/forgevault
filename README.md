@@ -115,6 +115,28 @@ A Master Key vive em `/root/.forgevault/master.key` com permissão `600`
 (`LocalFileKeyProvider`, ver `docs/modules/03_SECRETS_AND_ENCRYPTION.md`). Testes unitários de
 criptografia usam chaves temporárias próprias e não dependem desse arquivo.
 
+### Dashboard (`ForgeVault.Web`)
+
+```bash
+# via Docker (build + serve com nginx, proxy /api -> api:8080 dentro da rede do compose)
+docker compose up -d --build api web
+# http://127.0.0.1:4200  — só localhost, nunca 0.0.0.0 (ver "Segurança" abaixo)
+
+# ou em desenvolvimento ativo, sem Docker
+cd src/ForgeVault.Web
+npm install
+npm run dev
+# http://localhost:5173 — o proxy do Vite encaminha /api para a Api rodando em :8080
+```
+
+React + TypeScript + Vite + TailwindCSS, design system próprio (não o shadcn/ui do
+ForgeHub) tematizado como cofre — paleta derivada de `docs/assets/forgevault-icon.svg`,
+identificadores e valores de secret sempre em monospace, reveal como cadeado
+fechado/aberto com contagem regressiva. Cobre toda a hierarquia
+Organization→Project→Environment→Secret, Service Accounts, Access/Roles (M9) e Audit.
+Tanto `api` quanto `web` no `docker-compose.yml` só publicam em `127.0.0.1` — nunca
+`0.0.0.0` — porque o consumo é sempre local.
+
 ## API
 
 ### Autenticação e MFA
@@ -246,7 +268,8 @@ cada push/PR.
 RBAC/auditoria, rotação/expiração, Service Accounts e backup/restore. **Onda 2, M8** completa
 — MCP Server nativo e o contrato de contexto ForgeHub/ForgeRouter fechado. **M9** completa —
 gestão de `RoleAssignment` via API/MCP e onboarding de agente em uma chamada, fechando o
-gargalo de concessão de acesso que antes exigia inserção direta no banco. Detalhe marco a
+gargalo de concessão de acesso que antes exigia inserção direta no banco. **Dashboard
+(`ForgeVault.Web`)** completo — primeira UI do projeto, ver seção acima. Detalhe marco a
 marco em `docs/architecture/IMPLEMENTATION_READINESS.md`.
 
 Fora do escopo atual, por decisão explícita (não esquecimento) — ver

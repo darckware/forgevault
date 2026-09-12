@@ -148,6 +148,19 @@ app.MapRoleAssignmentEndpoints();
 
 app.MapMcp("/mcp").RequireAuthorization();
 
+// No frontend exists yet (ForgeVault.Web, docs/architecture/IMPLEMENTATION_READINESS.md §7) —
+// without this, hitting the bare domain root returns an empty 404 that reads as "broken"
+// rather than "no UI yet, API is fine." Never includes anything sensitive, same rule as
+// every other unauthenticated route in this file.
+app.MapGet("/", () => Results.Ok(new
+{
+    service = "ForgeVault",
+    status = "ok",
+    health = "/health/live",
+    mcp = "/mcp",
+    docs = "https://github.com/marcelodarckferreira/forgevault",
+}));
+
 // M0 (docs/architecture/IMPLEMENTATION_READINESS.md): liveness has no DB dependency.
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
 

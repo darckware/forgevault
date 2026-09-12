@@ -38,8 +38,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Bound to 127.0.0.1 only (never 0.0.0.0) — tightened alongside adding the `web` service
+    # below: the API must not be reachable from outside localhost ("o consumo da api é pelo
+    # localhost"). This repo's cloudflared tunnel had an existing public route to this port
+    # from an earlier session; that's a separate misconfiguration that must be fixed in the
+    # Cloudflare dashboard (out of scope here) — this binding at least stops every other path
+    # (LAN, other containers publishing to the host) from exposing it.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__ForgeVault: "Host=postgres;Port=5432;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
@@ -50,11 +56,17 @@ services:
       # at the same default path (MasterKeyOptions.KeyFilePath) so no env override is needed.
       - /root/.forgevault:/root/.forgevault:ro
 
-  # web:
-  # ForgeVault.Web (React + TypeScript + Vite) is intentionally not scaffolded yet —
-  # per docs/architecture/IMPLEMENTATION_READINESS.md, active frontend work starts
-  # after the Secrets/Auth API surface (M4/M5) exists to consume. Add the service here
-  # once src/ForgeVault.Web is created.
+  web:
+    build:
+      context: src/ForgeVault.Web
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    # Bound to 127.0.0.1 only (never 0.0.0.0) — same "localhost only" requirement as `api`
+    # above. Port 4200 chosen because 3000 (darckware), 2100 (forgerouter), and 4173
+    # (forgehub) are already in use by sibling projects on this host.
+    ports:
+      - "127.0.0.1:4200:80"
 
 volumes:
   forgevault_postgres_data:

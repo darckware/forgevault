@@ -1,0 +1,45 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ForgeVault">
+  <!--
+    Identidade visual própria do ForgeVault — não replica o design system do ForgeHub
+    (indigo/âmbar, bigorna estilizada). Tema: cofre/segurança, associado à paleta
+    escura e ao acento metálico do ecossistema Darckware.
+  -->
+  <defs>
+    <linearGradient id="fv-bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a" />
+      <stop offset="1" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="fv-door" x1="24" y1="20" x2="104" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#164e63" />
+      <stop offset="1" stop-color="#0e2f3d" />
+    </linearGradient>
+    <linearGradient id="fv-accent" x1="46" y1="46" x2="82" y2="86" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2dd4bf" />
+      <stop offset="1" stop-color="#0d9488" />
+    </linearGradient>
+  </defs>
+
+  <!-- fundo -->
+  <rect width="128" height="128" rx="28" fill="url(#fv-bg)" />
+
+  <!-- porta do cofre -->
+  <circle cx="64" cy="66" r="40" fill="url(#fv-door)" stroke="#083344" stroke-width="2" />
+  <circle cx="64" cy="66" r="40" fill="none" stroke="#5eead4" stroke-opacity="0.18" stroke-width="1" />
+
+  <!-- anéis concêntricos (mecanismo do cofre) -->
+  <circle cx="64" cy="66" r="31" fill="none" stroke="#5eead4" stroke-opacity="0.35" stroke-width="1.5" />
+  <circle cx="64" cy="66" r="22" fill="none" stroke="#5eead4" stroke-opacity="0.5" stroke-width="1.5" />
+
+  <!-- pinos do mecanismo -->
+  <circle cx="64" cy="35" r="3" fill="#5eead4" />
+  <circle cx="93" cy="66" r="3" fill="#5eead4" />
+  <circle cx="64" cy="97" r="3" fill="#5eead4" />
+  <circle cx="35" cy="66" r="3" fill="#5eead4" />
+
+  <!-- fechadura central (buraco de chave) -->
+  <circle cx="64" cy="66" r="14" fill="url(#fv-accent)" />
+  <path d="M64 58a6 6 0 0 1 3.2 11.1L69.5 78h-11l2.3-8.9A6 6 0 0 1 64 58Z" fill="#022c22" />
+
+  <!-- brilho superior, associa ao acento "forjado" do ecossistema sem repetir o spark do ForgeHub -->
+  <path d="M32 30c8-10 20-16 32-16" stroke="#f8fafc" stroke-opacity="0.25" stroke-width="4" stroke-linecap="round" fill="none" />
+</svg>
