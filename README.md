@@ -137,6 +137,25 @@ Organization→Project→Environment→Secret, Service Accounts, Access/Roles (M
 Tanto `api` quanto `web` no `docker-compose.yml` só publicam em `127.0.0.1` — nunca
 `0.0.0.0` — porque o consumo é sempre local.
 
+### Importando credenciais de um `.env` existente
+
+Se você já tem senhas/chaves espalhadas em arquivos `.env`, `deploy/scripts/import_env.py`
+cadastra elas no ForgeVault de uma vez, agrupando variáveis relacionadas (ex.:
+`DB_HOST`/`DB_PASSWORD`/`DB_URL` viram um único secret `DB_PASSWORD` do tipo
+`DatabaseCredential`, com o host/porta/link/usuário guardados na descrição) e classificando
+o tipo de serviço automaticamente (Postgres, MySQL, Redis, SSH, S3, etc. — inclusive lendo o
+esquema de uma connection string como `postgres://...` quando o nome da variável não entrega
+o motor). Uma variável solta (só um `HOST`/`PORT`, sem senha/token no mesmo grupo) nunca vira
+secret sozinha — ela só enriquece a descrição do credential real do grupo.
+
+```bash
+python3 deploy/scripts/import_env.py \
+  --file /caminho/para/.env \
+  --environment-id <guid-do-environment> \
+  --email admin@darckware.local   # senha pedida interativamente, nunca por argumento
+# --dry-run mostra o que seria importado sem cadastrar nada
+```
+
 ## API
 
 ### Autenticação e MFA

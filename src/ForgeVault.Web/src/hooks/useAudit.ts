@@ -13,7 +13,7 @@ export interface AuditFilters {
   pageSize?: number;
 }
 
-export function useAudit(filters: AuditFilters) {
+export function useAudit(filters: AuditFilters, options?: { refetchInterval?: number }) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== "") {
@@ -24,5 +24,6 @@ export function useAudit(filters: AuditFilters) {
   return useQuery({
     queryKey: ["audit", filters],
     queryFn: () => apiGet<AuditLogPage>(`/api/v1/audit?${params.toString()}`),
+    refetchInterval: options?.refetchInterval,
   });
 }

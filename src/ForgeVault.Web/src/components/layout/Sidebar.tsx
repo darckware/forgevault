@@ -1,8 +1,9 @@
 import { NavLink } from "react-router-dom";
-import { Building2, KeyRound, ScrollText, ShieldCheck } from "lucide-react";
+import { Activity, Building2, KeyRound, ScrollText, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const NAV_ITEMS = [
+  { to: "/overview", label: "Overview", icon: Activity },
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/service-accounts", label: "Service Accounts", icon: KeyRound },
   { to: "/access", label: "Access & Roles", icon: ShieldCheck },

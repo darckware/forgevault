@@ -117,7 +117,7 @@ const PILLARS = [
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname: string } } | null)?.from?.pathname ?? "/organizations";
+  const from = (location.state as { from?: { pathname: string } } | null)?.from?.pathname ?? "/overview";
 
   const [needsMfa, setNeedsMfa] = useState(false);
   const [showPassword, setShowPassword] = useState(false);

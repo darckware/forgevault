@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
+import { OverviewPage } from "@/pages/OverviewPage";
 import { OrganizationsPage } from "@/pages/OrganizationsPage";
 import { OrganizationDetailPage } from "@/pages/OrganizationDetailPage";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
@@ -24,7 +25,8 @@ export function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<Navigate to="/organizations" replace />} />
+        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/overview" element={<OverviewPage />} />
         <Route path="/organizations" element={<OrganizationsPage />} />
         <Route path="/organizations/:orgId" element={<OrganizationDetailPage />} />
         <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
