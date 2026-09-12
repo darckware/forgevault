@@ -44,6 +44,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__ForgeVault: "Host=postgres;Port=5432;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
       ConnectionStrings__Redis: "redis:6379"
+    volumes:
+      # LocalFileKeyProvider fails fast without this (docs/modules/03_SECRETS_AND_ENCRYPTION.md)
+      # — read-only mount of the same host-generated Master Key used by local `dotnet run`,
+      # at the same default path (MasterKeyOptions.KeyFilePath) so no env override is needed.
+      - /root/.forgevault:/root/.forgevault:ro
 
   # web:
   # ForgeVault.Web (React + TypeScript + Vite) is intentionally not scaffolded yet —
