@@ -1,256 +1,233 @@
-# ForgeVault
+<p align="center">
+  <img src="docs/assets/forgevault-icon.svg" width="96" height="96" alt="ForgeVault">
+</p>
 
-Cofre central de credenciais e secrets do ecossistema Darckware — Security Plane consumido por ForgeHub, ForgeRouter, Hermes e demais agentes/serviços.
+<h1 align="center">ForgeVault</h1>
 
-## Estado atual
+<p align="center">
+  Cofre central de credenciais e secrets do ecossistema Darckware.<br>
+  A <em>Security Plane</em> compartilhada consumida por <strong>ForgeHub</strong>, <strong>ForgeRouter</strong>, Hermes e demais agentes/serviços.
+</p>
 
-**Onda 1 (MVP) completa** — marcos **M0** a **M7** implementados (scaffold, DbContext,
-criptografia, login/JWT/MFA, Secrets CRUD, RBAC/auditoria, rotação/expiração, Service
-Accounts/backup-restore). **Onda 2, M8 completo** — MCP Server nativo (onda 1 de 8 tools) +
-contrato de contexto ForgeHub fechado (`docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md`).
-Ver `docs/architecture/IMPLEMENTATION_READINESS.md` para o detalhe de cada marco.
+<p align="center">
+  <a href="https://github.com/marcelodarckferreira/forgevault/actions/workflows/ci.yml"><img src="https://github.com/marcelodarckferreira/forgevault/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
+  <img src="https://img.shields.io/badge/PostgreSQL-17-336791" alt="PostgreSQL 17">
+  <img src="https://img.shields.io/badge/status-Onda%201%20(MVP)%20%2B%20M8-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License">
+</p>
 
-Checklist de aceite do MVP (`docs/ForgeVault.md` §62 / `docs/specs/PRD.md` §8) — todos
-verificados com teste automatizado (e, para o restore, também com um drill manual real
-nesta sessão):
+---
 
-- [x] usuário autentica com MFA (`MfaFlowTests`)
-- [x] cria organization/projeto/ambiente (`SecretsCrudFlowTests`)
-- [x] cria secret, valor fica criptografado (`SecretsCrudFlowTests`, `AesGcmEnvelopeEncryptionServiceTests`)
-- [x] usuário autorizado recupera o valor / não autorizado recebe 403 (`RbacRevealAuditTests`)
-- [x] toda leitura gera auditoria, inclusive negação (`RbacRevealAuditTests`)
-- [x] versões são mantidas (`SecretsCrudFlowTests`, `SecretRotationAndExpirationTests`)
-- [x] secrets podem expirar (`SecretRotationAndExpirationTests`)
-- [x] ForgeHub consegue autenticar (`ServiceAccountIntegrationTests`, via Service Account)
-- [x] ForgeRouter consegue recuperar credencial (`ServiceAccountIntegrationTests`)
-- [x] backup pode ser restaurado (drill manual: `deploy/scripts/backup.sh` → `restore.sh` → decrypt de um secret conhecido confirmado nesta sessão; não automatizado como teste de CI — ver nota em "Backup e Restore" abaixo)
+## O que é o ForgeVault
 
-**Comece pela documentação, não pelo código:** leia `docs/README.md` primeiro — ele define a hierarquia de autoridade entre `docs/specs/`, `docs/architecture/` e `docs/modules/`, e evita que qualquer trabalho assuma como implementado algo que ainda é só especificação.
+Nenhum agente, serviço ou humano deveria precisar hardcodar uma API key, uma senha de banco
+ou um token de terceiro para operar dentro do ecossistema Darckware. O ForgeVault existe para
+resolver exatamente isso: um cofre central de credenciais com **envelope encryption**, **RBAC
+hierárquico**, **auditoria à prova de vazamento** e integração nativa — via REST e via
+**MCP Server** — para que ForgeHub, ForgeRouter e agentes autônomos obtenham credenciais sob
+demanda, sem que elas fiquem espalhadas em `.env`, repositórios ou configs.
 
-## Estrutura
+## Principais capacidades
+
+| Capacidade | Descrição |
+|---|---|
+| **Envelope encryption** | AES-256-GCM por versão de secret, DEK protegido por uma Master Key (KEK) via provider plugável (`IKeyManagementProvider`) — trocar para um KMS/HSM real é uma troca de implementação, não de contrato |
+| **Versionamento imutável** | toda escrita cria uma nova `SecretVersion`; nada é sobrescrito, versões anteriores continuam legíveis |
+| **RBAC hierárquico** | `Organization → Project → Environment`, com herança de papel para baixo na hierarquia e uma matriz papel→permissão explícita |
+| **Auditoria à prova de vazamento** | toda leitura/escrita — inclusive negações — gera um `AuditLog`; testado ativamente para garantir que nenhum valor de secret apareça em log de aplicação ou de auditoria |
+| **Autenticação dupla** | JWT (humanos, com MFA/TOTP opcional) e tokens de Service Account (`fv_sa_...`, para ForgeHub/ForgeRouter/serviços) — o mesmo header `Authorization: Bearer` resolve os dois automaticamente |
+| **MCP Server nativo** | além da API REST, um servidor MCP (`/mcp`) expõe as mesmas operações como *tools* para agentes — mesma autenticação, mesmo RBAC, mesma trilha de auditoria, nenhum caminho paralelo |
+| **Backup/restore testado** | scripts que rodam `pg_dump`/`pg_restore` dentro do container Postgres, com a Master Key sempre em backup separado do banco |
+
+## Arquitetura
+
+Clean Architecture — `Domain` não depende de nada externo; cada camada acima só conhece a que
+está abaixo dela:
+
+```text
+ForgeVault.Domain            entidades e regras de domínio
+        ↑
+ForgeVault.Application       casos de uso, interfaces (IKeyManagementProvider, IPermissionChecker, ...)
+        ↑
+ForgeVault.Infrastructure    EF Core + Npgsql, criptografia (AES-256-GCM), JWT, RBAC
+        ↑
+ForgeVault.Api               ASP.NET Core Web API — REST + MCP Server, composition root
+ForgeVault.Worker            jobs em background (expiração, rotação agendada)
+ForgeVault.Web               React + TypeScript (ainda não implementado)
+```
+
+**Stack:** ASP.NET Core (.NET 10), Entity Framework Core + Npgsql, PostgreSQL 17 como
+datastore único e autoritativo, Redis como suporte não-autoritativo, SDK oficial
+`ModelContextProtocol` para o servidor MCP.
+
+## Estrutura do repositório
 
 ```text
 forgevault/
 ├── src/
-│   ├── ForgeVault.Domain/          # entidades e regras de domínio, sem dependências externas
-│   ├── ForgeVault.Application/     # casos de uso, interfaces (IKeyManagementProvider, etc.)
-│   ├── ForgeVault.Infrastructure/  # EF Core, Npgsql, criptografia, JWT
-│   ├── ForgeVault.Api/             # ASP.NET Core Web API (composition root)
-│   ├── ForgeVault.Worker/          # jobs em background (expiração, rotação agendada)
-│   └── ForgeVault.Web/             # React + TypeScript (ainda não criado — ver IMPLEMENTATION_READINESS.md)
+│   ├── ForgeVault.Domain/          # entidades e regras de domínio
+│   ├── ForgeVault.Application/     # casos de uso e interfaces
+│   ├── ForgeVault.Infrastructure/  # EF Core, criptografia, JWT, RBAC
+│   ├── ForgeVault.Api/             # Web API — REST + MCP Server
+│   ├── ForgeVault.Worker/          # jobs em background
+│   └── ForgeVault.Web/             # frontend (não implementado ainda)
 ├── tests/
-│   ├── Unit/, Integration/, Security/, E2E/
+│   └── Unit/, Integration/, Security/, E2E/
 ├── deploy/
-│   ├── docker/, kubernetes/, scripts/
+│   └── docker/, kubernetes/, scripts/
 ├── docs/                           # comece por docs/README.md
 ├── docker-compose.yml
 └── ForgeVault.slnx
 ```
 
-## Rodando localmente
+## Começando
+
+### Pré-requisitos
+
+- .NET SDK 10
+- Docker (Postgres 17 + Redis via `docker-compose.yml`)
+- `dotnet-ef` (`dotnet tool install --global dotnet-ef`)
+
+### Subindo o ambiente
 
 ```bash
-# sobe Postgres (host port 5435 — ver comentário no docker-compose.yml sobre
-# conflito com os bancos de outros projetos Darckware neste host) + Redis
+# Postgres (porta 5435 no host — ver docker-compose.yml para o motivo do não-padrão) + Redis
 docker compose up -d postgres redis
 
-# aplica as migrations (requer a ferramenta dotnet-ef instalada: dotnet tool install --global dotnet-ef)
+# aplica as migrations
 dotnet ef database update --project src/ForgeVault.Infrastructure --startup-project src/ForgeVault.Api
 
-# build e testes — ForgeVault.Api.IntegrationTests round-tripa dados reais no Postgres
-# acima (docs/architecture/IMPLEMENTATION_READINESS.md, M1), então o banco precisa
-# estar de pé e com a migration aplicada antes de rodar os testes
+# Master Key — obrigatória, nunca gerada silenciosamente pela aplicação
+deploy/scripts/generate-master-key.sh
+
+# build e testes
 dotnet build ForgeVault.slnx
 dotnet test ForgeVault.slnx
 
-# rodar a Api localmente (fora do compose, apontando pro Postgres do compose)
+# rodar a Api
 dotnet run --project src/ForgeVault.Api
-# GET http://localhost:5xxx/health/live  -> 200 sempre
-# GET http://localhost:5xxx/health/ready -> 200 se o Postgres estiver acessível, 503 caso contrário
+# GET /health/live  -> 200 sempre
+# GET /health/ready -> 200 se o Postgres estiver acessível, 503 caso contrário
 ```
 
-### Master Key (criptografia de secrets)
+A Master Key vive em `/root/.forgevault/master.key` com permissão `600`
+(`LocalFileKeyProvider`, ver `docs/modules/03_SECRETS_AND_ENCRYPTION.md`). Testes unitários de
+criptografia usam chaves temporárias próprias e não dependem desse arquivo.
 
-O `LocalFileKeyProvider` (docs/modules/03_SECRETS_AND_ENCRYPTION.md) exige uma Master Key
-em `/root/.forgevault/master.key` com permissão `600` — ela nunca é gerada silenciosamente
-pela aplicação (docs/ForgeVault.md §141). Gere-a uma vez com:
+## API
 
-```bash
-deploy/scripts/generate-master-key.sh
-```
-
-Os testes unitários de criptografia (`tests/Unit/ForgeVault.Infrastructure.Tests`) não
-dependem desse arquivo real — cada teste cria e descarta sua própria chave temporária.
-
-### Autenticação (M3) e MFA/TOTP (M6)
-
-`POST /api/v1/auth/login`, `POST /api/v1/auth/refresh` e `GET /api/v1/auth/me` (autenticado)
-— JWT curto (15 min por padrão) + refresh token rotativo com detecção de reuso (reapresentar
-um refresh token já rotacionado revoga toda a família). A chave de assinatura JWT em
-`appsettings.json` é um valor de desenvolvimento — sobrescreva via `Jwt__SigningKey` em
-produção.
-
-**MFA (TOTP)**: `POST /api/v1/auth/mfa/enroll` (autenticado, gera um segredo TOTP
-envelope-encriptado com o módulo do M2 e retorna o segredo em base32 + uma URI
-`otpauth://` — a única vez que o segredo aparece em texto puro, mesma lógica de "revelar
-uma vez" usada para tokens de agente) e `POST /api/v1/auth/mfa/verify` (confirma com um
-código real do autenticador; só then `MfaEnabled` vira `true`). A partir daí, `POST
-/api/v1/auth/login` exige `mfaCode` para essa conta (`mfa_required`/`invalid_mfa_code` se
-faltar/errar). Implementado com HMACSHA1 puro do BCL (RFC 6238), sem dependência externa —
-mesma filosofia do hash de senha PBKDF2.
-
-`Auth:Mfa:Enabled=true` por padrão agora, mas o `RequireMfa` (aplicado hoje só em `GET
-/secrets/{id}/value`) só exige o código de quem **já habilitou** MFA — contas que nunca
-chamaram `/mfa/enroll` não são afetadas, então isso não bloqueia retroativamente nenhuma
-conta criada antes do M6. O token de acesso carrega `mfa_enabled`/`mfa_verified`, e o
-refresh token guarda esse status por família, para não pedir o código de novo a cada 15
-minutos.
-
-### Secrets (M4) e RBAC/Auditoria (M5)
+### Autenticação e MFA
 
 ```text
-POST/GET/PUT/DELETE /api/v1/organizations[/{id}]        (sem RBAC — bootstrap, ver nota abaixo)
-POST/GET            /api/v1/organizations/{organizationId}/projects   (RBAC: ProjectWrite)
-GET/PUT/DELETE      /api/v1/projects/{id}                             (RBAC: ProjectWrite)
-POST/GET            /api/v1/projects/{projectId}/environments         (RBAC: EnvironmentWrite)
-GET/DELETE          /api/v1/environments/{id}                         (RBAC: EnvironmentWrite)
-POST/GET            /api/v1/secrets                                   (RBAC: SecretWrite)
-GET/PUT             /api/v1/secrets/{id}                              (PUT: RBAC SecretWrite)
+POST /api/v1/auth/login          JWT (15 min) + refresh token rotativo com detecção de reuso
+POST /api/v1/auth/refresh
+GET  /api/v1/auth/me
+POST /api/v1/auth/mfa/enroll     TOTP (RFC 6238), HMACSHA1 puro do BCL
+POST /api/v1/auth/mfa/verify
+```
+
+### Organizações, projetos, ambientes e secrets
+
+```text
+POST/GET/PUT/DELETE /api/v1/organizations[/{id}]
+POST/GET            /api/v1/organizations/{organizationId}/projects        RBAC: ProjectWrite
+GET/PUT/DELETE      /api/v1/projects/{id}                                  RBAC: ProjectWrite
+POST/GET            /api/v1/projects/{projectId}/environments              RBAC: EnvironmentWrite
+GET/DELETE          /api/v1/environments/{id}                              RBAC: EnvironmentWrite
+POST/GET            /api/v1/secrets                                       RBAC: SecretWrite
+GET/PUT             /api/v1/secrets/{id}                                   PUT: RBAC SecretWrite
 GET                 /api/v1/secrets/{id}/versions
-GET                 /api/v1/secrets/{id}/value?mode=REVEAL            (RBAC: SecretReadValue + RequireMfa)
-POST                /api/v1/secrets/{id}/rotate                       (RBAC: SecretWrite)
+GET                 /api/v1/secrets/{id}/value?mode=REVEAL                 RBAC: SecretReadValue + MFA
+POST                /api/v1/secrets/{id}/rotate                            RBAC: SecretWrite
+POST                /api/v1/secrets/{id}/revoke                            RBAC: SecretWrite
 ```
 
-`POST .../rotate` (M6) cria uma nova versão exatamente como o `PUT`, mas é auditado como
-`SECRET_ROTATE` (não `SECRET_UPDATE`) — a versão anterior nunca é sobrescrita e continua
-legível via `GET .../versions`. Rotação automatizada via API de provider (`PROVIDER_API`)
-e cascade/impact-analysis no revoke continuam módulo 07 (Fase 2). Secrets com `expires_at`
-no passado são negados em `GET .../value` (409, auditado como `FAILED_ACCESS`) — checagem
-em tempo de consulta, sem job de background.
+`mode` já existe no contrato de leitura mesmo com só `REVEAL` implementado, para que
+`BROKER`/`SESSION`/`LEASE`/`INJECT` sejam aditivos quando chegarem.
 
-`POST`/`PUT` em `/api/v1/secrets` criptografam o valor com o módulo do M2 (AES-256-GCM via
-`LocalFileKeyProvider`) antes de gravar; cada escrita cria uma nova `SecretVersion` imutável.
-`GET .../value?mode=REVEAL` é o único endpoint que retorna o valor decifrado — o parâmetro
-`mode` já existe no contrato para que `BROKER`/`SESSION`/`LEASE`/`INJECT` sejam aditivos
-quando chegarem (Fase 2/3), sem quebrar compatibilidade.
-
-**RBAC**: um `RoleAssignment` (`identity_id`, `role`, `scope_type`, `scope_id`) concede um
-papel (`Owner`, `Admin`, `SecurityAdmin`, `ProjectAdmin`, `Developer`, `Operator`, `Auditor`,
-`ReadOnly`, `Agent`, `ServiceAccount`) em um escopo (Organization/Project/Environment), com
-herança para baixo — um papel na Organization vale para todos os Projects/Environments/Secrets
-abaixo dela. A matriz papel→permissão fica em
-`ForgeVault.Infrastructure/Authorization/RolePermissions.cs` (documentada ali; é um primeiro
-corte, não uma engine de política definitiva). **Não existe endpoint para gerenciar
-`RoleAssignment` ainda** — mesma decisão já tomada para criação de usuários no M3: hoje esses
-registros são inseridos diretamente via `DbContext` (ver os testes em
-`tests/Security/ForgeVault.Security.Tests/RbacRevealAuditTests.cs` para o padrão). Criação de
-Organization não tem RBAC (é a raiz da hierarquia — ver comentário em
-`OrganizationEndpoints.cs`).
-
-**Auditoria**: toda leitura/escrita relevante grava um `AuditLog` (nunca o valor do secret) —
-inclusive negações de acesso (`FAILED_ACCESS`). Testado explicitamente em
-`RbacRevealAuditTests` com asserção de que nenhuma linha de auditoria nem nenhuma linha de log
-da aplicação (via um `ILoggerProvider` que captura tudo durante o teste) contém o valor em
-texto puro, mesmo no caminho de negação.
-
-Como a Api resolve a Master Key na inicialização (fail-fast), ela precisa existir antes de
-rodar a Api ou os testes que sobem o host real (`ForgeVault.Api.IntegrationTests`,
-`ForgeVault.E2E.Tests`, `ForgeVault.Security.Tests`) — ver seção "Master Key" acima.
-
-### Service Accounts (M7)
-
-ForgeHub/ForgeRouter (ou qualquer outro sistema) autenticam como identidades de serviço
-próprias, nunca reutilizando um usuário humano — ver `docs/architecture/INTEGRATION_CONTRACT_MVP.md`
-para o contrato completo.
+### Service Accounts e Auditoria
 
 ```text
-POST /api/v1/service-accounts                       cria a identidade
-POST /api/v1/service-accounts/{id}/tokens            emite um token fv_sa_... (mostrado uma única vez)
-POST /api/v1/service-accounts/{id}/tokens/{tokenId}/revoke
+POST /api/v1/service-accounts                        cria a identidade de serviço
+POST /api/v1/service-accounts/{id}/tokens             emite um token fv_sa_... (mostrado uma vez)
+POST /api/v1/service-accounts/{id}/tokens/{id}/revoke
 GET  /api/v1/service-accounts
+
+GET  /api/v1/audit                                    RBAC: AuditRead (checado em qualquer escopo)
 ```
 
-O token `fv_sa_...` é usado exatamente como um JWT humano (`Authorization: Bearer ...`) —
-um "policy scheme" no `Program.cs` decide automaticamente qual dos dois validadores usar,
-pelo prefixo do token, sem header adicional. RBAC funciona de forma idêntica para
-identidades de serviço (`RoleAssignment.IdentityId` aceita o `Guid` de um `ServiceAccount`
-do mesmo jeito que aceita o de um `User`) — `ServiceAccountIntegrationTests` prova que uma
-service account sem `RoleAssignment` recebe 403 no reveal, exatamente como um usuário sem
-papel receberia. MFA nunca se aplica a tokens de serviço. Criação de Service Account não
-tem RBAC própria, mesma decisão já tomada para Organization (identidade de plataforma, sem
-escopo pai).
+### MCP Server
 
-### Backup e Restore (M7)
+Além do REST, ForgeVault expõe um servidor MCP nativo no mesmo processo, com a mesma
+autenticação (JWT humano ou token de serviço `fv_sa_...`):
+
+```text
+POST /mcp   (Streamable HTTP, stateless)
+```
+
+| Tool | Descrição |
+|---|---|
+| `secret.metadata` | metadados de um secret, nunca o valor |
+| `credential.request` | recupera o valor sob RBAC (hoje só `accessMode=REVEAL`); aceita `taskId`/`onBehalfOfAgent`/`runtimeSessionRef` como metadado de auditoria opcional — nunca como entrada de autorização |
+| `capability.check` | simula uma permissão sem executar nem revelar nada |
+| `admin.secret.create` / `update` / `rotate` / `revoke` | ciclo de vida completo de um secret |
+| `admin.audit.search` | busca na trilha de auditoria |
+
+Toda tool reaproveita exatamente os mesmos serviços dos endpoints REST equivalentes — nenhuma
+lógica de autorização ou auditoria duplicada. Ver `docs/architecture/INTEGRATION_CONTRACT_MVP.md`
+para um exemplo de chamada completo.
+
+## Segurança
+
+- **Criptografia:** envelope encryption AES-256-GCM; a Master Key nunca vive no banco, no
+  repositório ou em variável de ambiente sem proteção — só em arquivo com permissão restrita.
+- **RBAC:** `RoleAssignment(identity_id, role, scope_type, scope_id)` com herança
+  Organization → Project → Environment; matriz papel→permissão em
+  `ForgeVault.Infrastructure/Authorization/RolePermissions.cs`.
+- **Auditoria:** `AuditLog` append-only, nunca contém valor de secret — verificado por testes
+  que capturam toda saída de log da aplicação durante os cenários de RBAC/reveal.
+- **MFA:** TOTP obrigatório apenas para contas que optaram por habilitá-lo, aplicado hoje na
+  leitura de valor de secret.
+
+## Testes
 
 ```bash
-FORGEVAULT_BACKUP_DIR=./backups deploy/scripts/backup.sh
-FORGEVAULT_MASTER_KEY_BACKUP_DIR=/algum/lugar/bem/separado deploy/scripts/backup-master-key.sh
-deploy/scripts/restore.sh <arquivo-de-backup.dump> [backup-da-master-key]
+dotnet test ForgeVault.slnx
 ```
 
-Os scripts rodam `pg_dump`/`pg_restore` **dentro do container** do Postgres
-(`docker exec`), não no host — evita depender de um cliente `postgresql-client` com a
-mesma versão major do servidor (o host deste projeto só tinha a v16 disponível via apt
-para um servidor v17; `pg_dump` recusa rodar contra um servidor mais novo). O backup da
-Master Key é sempre um script/diretório separado do backup do banco (`docs/ForgeVault.md`
-§56, "regra de ouro") — `backup-master-key.sh` exige `FORGEVAULT_MASTER_KEY_BACKUP_DIR`
-explicitamente, sem default, para forçar essa separação consciente.
+| Suite | Foco |
+|---|---|
+| `Unit` | criptografia, permissões — isolado, sem I/O |
+| `Integration` | round-trip real contra Postgres |
+| `Security` | RBAC, IDOR, escalonamento de privilégio, ausência de vazamento em log/auditoria |
+| `E2E` | fluxos completos via `WebApplicationFactory` — autenticação, MFA, Service Accounts, MCP |
 
-Rodei o drill completo manualmente nesta sessão: criei um secret com valor conhecido,
-rodei `backup.sh`, restaurei em um banco `forgevault_drill` isolado (mesma instância
-Postgres, banco descartável — não sobrescrevi o banco de dev compartilhado pelos testes),
-subi uma segunda instância da Api apontando para ele, logei com o mesmo usuário
-(preservado no dump) e o `GET .../value?mode=REVEAL` devolveu o valor original
-corretamente — a mesma Master Key (inalterada) decifrou os dados restaurados. Isso não
-virou um teste automatizado de CI porque exigiria `pg_dump`/`pg_restore`/`createdb` com
-versão compatível disponíveis no runner (o ambiente de CI atual só tem o serviço Postgres
-via GitHub Actions, sem client tools instalados) — ficou registrado aqui como evidência do
-drill, não como suíte repetível.
+CI (`.github/workflows/ci.yml`) builda e roda a suíte completa contra um Postgres 17 real a
+cada push/PR.
 
-### MCP Server nativo (M8)
+## Estado do projeto
 
-Além da API REST, ForgeVault expõe um MCP Server nativo, mesmo processo/host, mesma
-autenticação (`SmartAuth` — JWT humano ou token `fv_sa_...` de serviço):
+**Onda 1 (MVP)** completa — scaffold, criptografia, autenticação/MFA, Secrets CRUD,
+RBAC/auditoria, rotação/expiração, Service Accounts e backup/restore. **Onda 2, M8** completa
+— MCP Server nativo e o contrato de contexto ForgeHub/ForgeRouter fechado. Detalhe marco a
+marco em `docs/architecture/IMPLEMENTATION_READINESS.md`.
 
-```text
-POST /mcp   (Streamable HTTP, stateless — RequireAuthorization)
-```
-
-Tools implementadas em `src/ForgeVault.Api/Mcp/VaultTools.cs` — cada uma reaproveita
-exatamente os mesmos serviços dos endpoints REST equivalentes (`IPermissionChecker`,
-`AuditLogFactory`, `IEnvelopeEncryptionService`), nunca uma segunda lógica de
-autorização/auditoria:
-
-```text
-secret.metadata
-credential.request        (só accessMode=REVEAL; aceita taskId/onBehalfOfAgent/runtimeSessionRef
-                            como metadado de auditoria opcional — nunca usado para autorização)
-capability.check
-admin.secret.create / update / rotate / revoke
-admin.audit.search
-```
-
-`admin.secret.revoke` e `GET /api/v1/audit` (+ `POST /api/v1/secrets/{id}/revoke` equivalente
-em REST) são capacidades novas neste marco: `SecretStatus.Revoked` existia no enum desde o M3
-mas nada nunca o definia, e o papel `Auditor` não tinha nenhuma permissão desde o M5 — ambos
-corrigidos como pré-requisito direto para as tools `admin.secret.revoke`/`admin.audit.search`
-funcionarem.
-
-Erro de negócio/autorização numa tool chega como `CallToolResult` com `isError: true` e a
-mensagem em `content[0].text` — lançar `ModelContextProtocol.McpException` dentro da tool é o
-mecanismo correto (sua `Message` é propagada); qualquer parâmetro opcional de uma tool precisa
-de um valor default explícito em C# (`string? foo = null`) para o SDK tratá-lo como opcional
-no schema e na invocação — um `string?` sem default é rejeitado como argumento ausente.
-
-Ver `docs/architecture/INTEGRATION_CONTRACT_MVP.md` §7 para um exemplo de chamada completo e
-`docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` para o que ainda não existe
-(`access.*`/`session.*`/`approval.status`/`admin.policy.*`, modos além de REVEAL).
+Fora do escopo atual, por decisão explícita (não esquecimento) — ver
+`docs/architecture/IMPLEMENTATION_READINESS.md` §6: dynamic secrets/leases, KMS/HSM real,
+SSO/OIDC/LDAP, break-glass e quorum de aprovação, multi-tenant avançado, HA/Kubernetes.
 
 ## Documentação
 
-- `docs/README.md` — índice e hierarquia de autoridade da documentação.
-- `docs/specs/PRD.md` / `docs/specs/SPEC.md` — visão e especificação baseline.
-- `docs/architecture/TARGET_ARCHITECTURE.md` — arquitetura-alvo.
-- `docs/architecture/IMPLEMENTATION_READINESS.md` — ordem de implementação e marcos de engenharia.
-- `docs/architecture/INTEGRATION_CONTRACT_MVP.md` — como ForgeHub/ForgeRouter integram hoje.
-- `docs/modules/` — spec de cada módulo implementável.
+| Documento | Conteúdo |
+|---|---|
+| [`docs/README.md`](docs/README.md) | índice e hierarquia de autoridade da documentação |
+| [`docs/specs/PRD.md`](docs/specs/PRD.md) / [`SPEC.md`](docs/specs/SPEC.md) | visão e especificação baseline |
+| [`docs/architecture/TARGET_ARCHITECTURE.md`](docs/architecture/TARGET_ARCHITECTURE.md) | arquitetura-alvo |
+| [`docs/architecture/IMPLEMENTATION_READINESS.md`](docs/architecture/IMPLEMENTATION_READINESS.md) | ordem de implementação e marcos de engenharia |
+| [`docs/architecture/INTEGRATION_CONTRACT_MVP.md`](docs/architecture/INTEGRATION_CONTRACT_MVP.md) | contrato de integração REST + MCP para ForgeHub/ForgeRouter |
+| [`docs/modules/`](docs/modules/) | spec de cada módulo implementável |
+
+---
+
+<p align="center"><sub>Parte do ecossistema Darckware — sibling de <strong>ForgeHub</strong> e <strong>ForgeRouter</strong>.</sub></p>
