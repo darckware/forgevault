@@ -44,6 +44,20 @@ Insumo de um exercício de planejamento de engenharia dedicado (ver histórico d
 
 Checkpoint final da Onda 1: percorrer os 13 itens de `docs/specs/PRD.md` §8 como checklist de aceite manual/E2E.
 
+## 3.1. Marco de Engenharia da Onda 2 — M8 (integração real ForgeHub/ForgeRouter + MCP nativo)
+
+Primeiro marco além do MVP, cobrindo a fatia do módulo `09` que já tem lógica de backend suficiente para ser implementável sem inventar entidades (`CredentialRequest`/`AccessGrant`/`Session`/`Lease`/`Approval` continuam Fase 2/3, ver §6 abaixo).
+
+| Entrega | Detalhe |
+|---|---|
+| SDK oficial de MCP (`ModelContextProtocol` + `ModelContextProtocol.AspNetCore` 2.2.0, GA, `net10.0`) | Registrado no host existente da API (`AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<VaultTools>()`, `app.MapMcp("/mcp").RequireAuthorization()`) — sem processo/host separado; reaproveita o `SmartAuth` do M7 (JWT humano ou token `fv_sa_...` de serviço autenticam igual) |
+| Contrato de contexto ForgeHub → ForgeVault (fecha a `open_blocking_question` do módulo `09`) | Revisão do código real do ForgeHub (não da sua arquitetura-alvo) mostrou que `ProjectTask` não expõe `project_id` diretamente (requer join) e que não existe correlation-id propagado hoje. O contexto real e disponível é `task_id` + identidade do agente (`onBehalfOfAgent`) + `TaskExecution.runtime_session_ref`. Esses três campos são aceitos como argumentos **opcionais** em `credential.request`, gravados em `AuditLog.Metadata` **apenas para rastreabilidade** — nunca usados para autorização (ABAC por task/agente permanece Fase 3, como o roadmap já previa) |
+| 8 tools MCP implementadas (`src/ForgeVault.Api/Mcp/VaultTools.cs`) | `secret.metadata`, `credential.request` (só modo `REVEAL`), `capability.check`, `admin.secret.create`, `admin.secret.update`, `admin.secret.rotate`, `admin.secret.revoke`, `admin.audit.search` — cada uma reaproveita exatamente os mesmos serviços dos endpoints REST (`IPermissionChecker`, `AuditLogFactory`, `IEnvelopeEncryptionService`) em vez de duplicar a lógica de autorização/auditoria |
+| Duas capacidades novas, pequenas, que faltavam desde marcos anteriores | `POST /api/v1/secrets/{id}/revoke` (o valor `Revoked` existe no enum `SecretStatus` desde M3, mas nada nunca o definia) e `GET /api/v1/audit` + `Permission.AuditRead` — corrige uma lacuna real em que o papel `Auditor` não tinha nenhuma permissão desde M5 |
+| Descoberta empírica sobre o SDK (documentada para não se repetir) | Um parâmetro de tool `string?` sem valor default (`= null`) é marcado como obrigatório no schema JSON exposto via `tools/list` e o SDK lança `ArgumentException` se o chamador omitir o argumento — não basta o tipo ser anulável em C#, o parâmetro precisa de um valor default explícito para ser tratado como opcional. `McpException` é o mecanismo correto para sinalizar erro ao cliente: sua `Message` é incluída no resultado (`isError: true`) tal como a documentação do SDK promete; qualquer outra exceção vira uma mensagem genérica sem detalhe |
+
+Testes: `tests/E2E/ForgeVault.E2E.Tests/McpToolsTests.cs` (chamadas JSON-RPC cruas sobre `HttpClient`/`WebApplicationFactory`, sem client MCP dedicado) cobrindo os AC-01/02/03 do módulo `09` em formato MCP; `tests/Security/ForgeVault.Security.Tests/AuditAndRevokeEndpointTests.cs` cobrindo os dois endpoints REST novos com o mesmo padrão de asserção "nenhum vazamento" de `RbacRevealAuditTests`.
+
 ## 4. Decisões de Design Já Fixadas para a Onda 1
 
 - **Modelo de dados**: `Organization → Project → Environment → Secret → SecretVersion → AuditLog` (§11), não o modelo multi-tenant de §81/§107. Justificativa: o próprio roadmap (§63) coloca "multi-tenant avançado" na Fase 4; o modelo simples satisfaz literalmente todos os critérios de aceite do MVP; migrar para `Tenant/Workspace` depois é aditivo (inserir camada acima), enquanto o caminho inverso seria disruptivo. Nomenclatura de `secret_versions` segue a DDL de §83 (`ciphertext`, `encrypted_dek`, `nonce`, `auth_tag`, `algorithm`), não os nomes mais antigos de §11.
@@ -86,7 +100,8 @@ Checkpoint final da Onda 1: percorrer os 13 itens de `docs/specs/PRD.md` §8 com
 
 | Item | Fase original (§63) | Onde retomar |
 |---|---|---|
-| MCP Server nativo e tools (`credential.request`, `access.request`, `admin.secret.*`, ...) | Fase 2 (arquiteturalmente sobre a API REST, §90) | `09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` |
+| MCP Server nativo — onda 1 de 8 tools (`secret.metadata`, `credential.request` modo REVEAL, `capability.check`, `admin.secret.*`, `admin.audit.search`) | Fase 2 | **Implementado no M8** — ver §3.1 acima e `09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` |
+| Tools MCP restantes (`credential.status/release`, `access.*`, `session.*`, `approval.status`, `admin.policy.*`) — dependem de `CredentialRequest`/`AccessGrant`/`Session`/`Lease`/`Approval`, que não existem | Fase 2/3 | `09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` (revisão futura) |
 | Dynamic secrets, leases/TTL, session brokering real (BROKER/SESSION/LEASE além do stub REVEAL) | Fase 3 | `10_RESILIENCE_HA_OPERATIONS.md` / spec futura de Access Plane avançado |
 | KMS/HSM reais (AWS KMS, Azure Key Vault, GCP KMS, Vault Transit, HSM) | Fase 4 (§143) | interface já pronta em `03_SECRETS_AND_ENCRYPTION.md`; troca de implementação apenas |
 | SSO/OIDC/OAuth2/LDAP/Active Directory | Fase 4 (§14) | `02_IDENTITY_AND_AUTHENTICATION.md` (revisão futura) |

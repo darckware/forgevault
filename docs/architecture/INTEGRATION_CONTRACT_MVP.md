@@ -1,6 +1,6 @@
-# ForgeVault — Contrato de Integração (MVP, M7)
+# ForgeVault — Contrato de Integração (MVP M7 + MCP M8)
 
-> **Status documental:** descreve o mecanismo de integração REST realmente implementado na Onda 1 (MVP). A visão completa de integração (MCP Server nativo, tools `credential.request`/`access.request`, contexto operacional propagado pelo ForgeHub) é `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` — Fase 2, ainda não implementada. Este documento é o contrato **mínimo e já funcional** que ForgeHub/ForgeRouter podem usar hoje.
+> **Status documental:** descreve os dois mecanismos de integração realmente implementados — REST (Onda 1/M7) e MCP nativo (M8, onda 1 de tools). A visão completa (tools `access.*`/`session.*`/`approval.status`/`admin.policy.*`, propagação de contexto operacional para autorização) continua em `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` — Fase 2/3, ainda não implementada. Este documento é o contrato **já funcional** que ForgeHub/ForgeRouter podem usar hoje, por qualquer uma das duas vias.
 
 ## 1. Identidade
 
@@ -47,7 +47,7 @@ Recomendação: conceder o menor escopo possível (Environment, não Organizatio
 
 ## 4. Fluxo ForgeHub (autenticação)
 
-ForgeHub autentica como `service:forgehub` para qualquer chamada que precise validar identidade/contexto de projeto no ForgeVault. Na Onda 1, isso se resume a: obter um token de serviço e conseguir chamar qualquer endpoint autenticado. A propagação de contexto operacional (`task_id`, `project_id`, `assigned_agent`) descrita em `docs/ForgeVault.md` §93 e no módulo 09 é Fase 2 — hoje o ForgeVault não recebe nem avalia esse contexto, apenas RBAC por identidade/escopo.
+ForgeHub autentica como `service:forgehub` para qualquer chamada que precise validar identidade/contexto de projeto no ForgeVault — via REST ou via MCP, mesmo token `fv_sa_...`, mesmo `SmartAuth`. Desde M8, uma chamada MCP a `credential.request` pode incluir `taskId`/`onBehalfOfAgent`/`runtimeSessionRef` (ver seção 7) — mas isso é metadado de auditoria, não entrada de autorização. `project_id` propagado para decisão de RBAC/ABAC por task/agente continua Fase 3 — hoje o ForgeVault avalia apenas RBAC por identidade/escopo, como antes do M8.
 
 ## 5. Fluxo ForgeRouter (recuperar credencial)
 
@@ -75,10 +75,28 @@ Resposta (200, se autorizado):
 
 ForgeRouter nunca deve persistir esse valor localmente além do necessário para a chamada em andamento (`docs/ForgeVault.md` §37, §94) — a cada uso, solicitar de novo ao ForgeVault, ou fazer cache em memória com TTL curto (segundos a poucos minutos), nunca em disco.
 
-## 6. O que ainda não existe (Fase 2+)
+## 7. Fluxo via MCP (M8)
 
-- MCP Server nativo (`docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md`) — hoje é só REST puro.
-- Propagação de contexto operacional (task/project) do ForgeHub para decisões de autorização.
-- Modos de acesso além de REVEAL (BROKER/SESSION/LEASE/INJECT).
+Alternativa ao REST para clientes MCP (agentes, Hermes, ou o próprio ForgeHub/ForgeRouter) — mesmo host, mesma autenticação `SmartAuth`, mesmas regras de RBAC/auditoria aplicadas dentro de cada tool (não via `[Authorize(Policy=...)]` do ASP.NET, que não modela autorização por recurso+escopo):
+
+```http
+POST /mcp
+Authorization: Bearer <jwt humano ou fv_sa_... de serviço>
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+  "name":"credential.request",
+  "arguments":{"secretId":"<guid>","taskId":"task-42","onBehalfOfAgent":"agent-hermes"}
+}}
+```
+
+Tools disponíveis hoje: `secret.metadata`, `credential.request` (só `REVEAL`), `capability.check`, `admin.secret.create/update/rotate/revoke`, `admin.audit.search` — ver `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` §7 para a lista completa incluindo o que ainda não existe. Erros de negócio/autorização chegam como `CallToolResult` com `isError: true` e a mensagem em `content[0].text` (lançar `McpException` dentro da tool, não deixar vazar outra exceção).
+
+## 6. O que ainda não existe (Fase 2/3+)
+
+- Tools MCP de `access.*`/`session.*`/`approval.status`/`admin.policy.*` e modos de acesso além de REVEAL (BROKER/SESSION/LEASE/INJECT) — dependem de `CredentialRequest`/`AccessGrant`/`Session`/`Lease`/`Approval`/Policy Engine, que não existem.
+- Propagação de contexto operacional (task/project) do ForgeHub para *decisões* de autorização (ABAC) — hoje `taskId`/`onBehalfOfAgent`/`runtimeSessionRef` só chegam como metadado de auditoria (M8, seção 7 acima).
 - Endpoint de gestão de `RoleAssignment`/`ServiceAccount` via UI — hoje é inserção direta no banco.
 - `correlation_id` propagado ponta a ponta entre Hermes → ForgeHub → ForgeVault → terceiro (`docs/ForgeVault.md` §113) — o `AuditLog` já tem a coluna, mas nada a preenche ainda.
+- Métricas `mcp_calls_total`/`credential_requests_total` (módulo 09 §11) — não implementadas neste marco.

@@ -6,8 +6,9 @@ Cofre central de credenciais e secrets do ecossistema Darckware — Security Pla
 
 **Onda 1 (MVP) completa** — marcos **M0** a **M7** implementados (scaffold, DbContext,
 criptografia, login/JWT/MFA, Secrets CRUD, RBAC/auditoria, rotação/expiração, Service
-Accounts/backup-restore). Ver `docs/architecture/IMPLEMENTATION_READINESS.md` para o
-detalhe de cada marco.
+Accounts/backup-restore). **Onda 2, M8 completo** — MCP Server nativo (onda 1 de 8 tools) +
+contrato de contexto ForgeHub fechado (`docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md`).
+Ver `docs/architecture/IMPLEMENTATION_READINESS.md` para o detalhe de cada marco.
 
 Checklist de aceite do MVP (`docs/ForgeVault.md` §62 / `docs/specs/PRD.md` §8) — todos
 verificados com teste automatizado (e, para o restore, também com um drill manual real
@@ -205,6 +206,45 @@ virou um teste automatizado de CI porque exigiria `pg_dump`/`pg_restore`/`create
 versão compatível disponíveis no runner (o ambiente de CI atual só tem o serviço Postgres
 via GitHub Actions, sem client tools instalados) — ficou registrado aqui como evidência do
 drill, não como suíte repetível.
+
+### MCP Server nativo (M8)
+
+Além da API REST, ForgeVault expõe um MCP Server nativo, mesmo processo/host, mesma
+autenticação (`SmartAuth` — JWT humano ou token `fv_sa_...` de serviço):
+
+```text
+POST /mcp   (Streamable HTTP, stateless — RequireAuthorization)
+```
+
+Tools implementadas em `src/ForgeVault.Api/Mcp/VaultTools.cs` — cada uma reaproveita
+exatamente os mesmos serviços dos endpoints REST equivalentes (`IPermissionChecker`,
+`AuditLogFactory`, `IEnvelopeEncryptionService`), nunca uma segunda lógica de
+autorização/auditoria:
+
+```text
+secret.metadata
+credential.request        (só accessMode=REVEAL; aceita taskId/onBehalfOfAgent/runtimeSessionRef
+                            como metadado de auditoria opcional — nunca usado para autorização)
+capability.check
+admin.secret.create / update / rotate / revoke
+admin.audit.search
+```
+
+`admin.secret.revoke` e `GET /api/v1/audit` (+ `POST /api/v1/secrets/{id}/revoke` equivalente
+em REST) são capacidades novas neste marco: `SecretStatus.Revoked` existia no enum desde o M3
+mas nada nunca o definia, e o papel `Auditor` não tinha nenhuma permissão desde o M5 — ambos
+corrigidos como pré-requisito direto para as tools `admin.secret.revoke`/`admin.audit.search`
+funcionarem.
+
+Erro de negócio/autorização numa tool chega como `CallToolResult` com `isError: true` e a
+mensagem em `content[0].text` — lançar `ModelContextProtocol.McpException` dentro da tool é o
+mecanismo correto (sua `Message` é propagada); qualquer parâmetro opcional de uma tool precisa
+de um valor default explícito em C# (`string? foo = null`) para o SDK tratá-lo como opcional
+no schema e na invocação — um `string?` sem default é rejeitado como argumento ausente.
+
+Ver `docs/architecture/INTEGRATION_CONTRACT_MVP.md` §7 para um exemplo de chamada completo e
+`docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` para o que ainda não existe
+(`access.*`/`session.*`/`approval.status`/`admin.policy.*`, modos além de REVEAL).
 
 ## Documentação
 

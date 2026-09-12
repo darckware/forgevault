@@ -87,7 +87,7 @@ public static class SecretEndpoints
             db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_CREATE", "secret", secret.Id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
-            return Results.Created($"/api/v1/secrets/{secret.Id}", ToMetadataResponse(secret));
+            return Results.Created($"/api/v1/secrets/{secret.Id}", SecretScopeResolver.ToMetadataResponse(secret));
         });
 
         group.MapGet("/", async (Guid? environmentId, ForgeVaultDbContext db, CancellationToken ct) =>
@@ -99,7 +99,7 @@ public static class SecretEndpoints
             }
 
             var secrets = await query.OrderBy(s => s.Name).ToListAsync(ct);
-            return Results.Ok(secrets.Select(ToMetadataResponse));
+            return Results.Ok(secrets.Select(SecretScopeResolver.ToMetadataResponse));
         });
 
         group.MapGet("/{id:guid}", async (Guid id, ForgeVaultDbContext db, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
@@ -113,7 +113,7 @@ public static class SecretEndpoints
             db.AuditLogs.Add(AuditLogFactory.Create(user.GetUserId(), user.GetActorType(), "SECRET_READ", "secret", id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
-            return Results.Ok(ToMetadataResponse(secret));
+            return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
         });
 
         // Updating the value always creates a new immutable SecretVersion — never an
@@ -128,7 +128,7 @@ public static class SecretEndpoints
             HttpContext http,
             CancellationToken ct) =>
         {
-            var resolved = await ResolveSecretWithScopeAsync(db, id, ct);
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
             if (resolved is null)
             {
                 return Results.NotFound();
@@ -180,7 +180,7 @@ public static class SecretEndpoints
             db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_UPDATE", "secret", secret.Id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
-            return Results.Ok(ToMetadataResponse(secret));
+            return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
         });
 
         group.MapGet("/{id:guid}/versions", async (Guid id, ForgeVaultDbContext db, CancellationToken ct) =>
@@ -218,7 +218,7 @@ public static class SecretEndpoints
                 return Results.Json(new ErrorResponse("unsupported_access_mode"), statusCode: StatusCodes.Status422UnprocessableEntity);
             }
 
-            var resolved = await ResolveSecretWithScopeAsync(db, id, ct);
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
             if (resolved is null)
             {
                 return Results.NotFound();
@@ -293,7 +293,7 @@ public static class SecretEndpoints
             HttpContext http,
             CancellationToken ct) =>
         {
-            var resolved = await ResolveSecretWithScopeAsync(db, id, ct);
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
             if (resolved is null)
             {
                 return Results.NotFound();
@@ -336,39 +336,49 @@ public static class SecretEndpoints
             db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_ROTATE", "secret", secret.Id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
-            return Results.Ok(ToMetadataResponse(secret));
+            return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
+        });
+
+        // M8 (docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md, admin.secret.revoke).
+        // Minimal revoke: flips Status -> Revoked so no further read/write/reveal/rotate
+        // succeeds (docs/ForgeVault.md §102). Cascade to grants/sessions/leases and
+        // provider-side revocation stay module 07 (Fase 2) — those entities don't exist yet.
+        group.MapPost("/{id:guid}/revoke", async (
+            Guid id,
+            ForgeVaultDbContext db,
+            IPermissionChecker permissions,
+            ClaimsPrincipal user,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
+            if (resolved is null)
+            {
+                return Results.NotFound();
+            }
+
+            var (secret, scope) = resolved.Value;
+            var actorId = user.GetUserId();
+            if (!await permissions.HasPermissionAsync(actorId, Permission.SecretWrite, scope, ct))
+            {
+                return Results.Forbid();
+            }
+
+            if (secret.Status is SecretStatus.Revoked)
+            {
+                // Idempotent — revoking an already-revoked secret is not an error.
+                return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
+            }
+
+            secret.Status = SecretStatus.Revoked;
+            secret.UpdatedAt = DateTimeOffset.UtcNow;
+
+            db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_REVOKE", "secret", secret.Id, http.TraceIdentifier));
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
         });
     }
-
-    private static async Task<(Secret Secret, ResourceScope Scope)?> ResolveSecretWithScopeAsync(
-        ForgeVaultDbContext db, Guid secretId, CancellationToken ct)
-    {
-        var secret = await db.Secrets.FindAsync([secretId], ct);
-        if (secret is null)
-        {
-            return null;
-        }
-
-        var chain = await db.Environments
-            .Where(e => e.Id == secret.EnvironmentId)
-            .Select(e => new { e.ProjectId, OrganizationId = e.Project!.OrganizationId })
-            .SingleAsync(ct);
-
-        return (secret, new ResourceScope(chain.OrganizationId, chain.ProjectId, secret.EnvironmentId));
-    }
-
-    private static SecretResponse ToMetadataResponse(Secret secret) => new(
-        secret.Id,
-        secret.EnvironmentId,
-        secret.Name,
-        secret.Type.ToString(),
-        secret.Provider,
-        secret.Description,
-        secret.Status.ToString(),
-        secret.CurrentVersion,
-        secret.CreatedAt,
-        secret.UpdatedAt,
-        secret.ExpiresAt);
 }
 
 public sealed record CreateSecretRequest(

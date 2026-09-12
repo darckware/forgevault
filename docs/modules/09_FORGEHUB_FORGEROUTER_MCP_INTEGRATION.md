@@ -4,16 +4,19 @@
 
 ```yaml
 spec_id: MOD-09-INTEGRATION-MCP
-revision: 1
+revision: 2
 status: draft
 owner: unassigned
 approvers: []
 target_release: Fase 2
 architecture_refs:
   - docs/architecture/TARGET_ARCHITECTURE.md
-decisions: []
-open_blocking_questions:
-  - "Contrato exato de contexto que o ForgeHub envia (task_id/project_id/assigned_agent/...) depende de uma revisão conjunta com o repositório forgehub — não fechado nesta revisão"
+  - docs/architecture/IMPLEMENTATION_READINESS.md §3.1 (M8)
+decisions:
+  - "M8: contrato de contexto ForgeHub -> ForgeVault fechado por revisão direta do código real do ForgeHub (não da sua arquitetura-alvo). ProjectTask não expõe project_id diretamente (requer join via PlanningItem/ChangeRequest), e não existe correlation-id propagado hoje. O contexto real e disponível é task_id + identidade do agente (onBehalfOfAgent) + TaskExecution.runtime_session_ref. Esses três campos são aceitos como argumentos OPCIONAIS de credential.request, gravados em AuditLog.Metadata apenas para rastreabilidade — nunca usados para autorização. ABAC por task/agente permanece Fase 3 (nenhuma mudança de escopo, apenas confirma o que o roadmap já previa)."
+  - "M8: ForgeHub/ForgeRouter autenticam no MCP Server exatamente como na REST API — como service:forgehub/service:forgerouter via Service Accounts (mecanismo já existente desde M7, token fv_sa_...). Não foi criado nenhum mecanismo de autenticação MCP-específico; o AgentServiceCredential (token agt_...) que o ForgeHub usa para chamar a si mesmo não é reaproveitado pelo ForgeVault."
+  - "M8: onda 1 de tools implementada com escopo deliberadamente restrito às que já têm lógica de backend real: secret.metadata, credential.request (só REVEAL), capability.check, admin.secret.create/update/rotate/revoke, admin.audit.search. As demais tools listadas na seção 7 (credential.status/release, access.*, session.*, approval.status, admin.policy.*) continuam Fase 2/3 — dependem de CredentialRequest/AccessGrant/Session/Lease/Approval, que não existem ainda."
+open_blocking_questions: []
 ```
 
 ## 2. Objetivo e limite
@@ -60,16 +63,21 @@ Reaproveita o ciclo de vida de token do módulo `02` para Service Accounts e MCP
 
 ## 7. Contratos de API
 
-Endpoint MCP (§90):
+Endpoint MCP (§90) — implementado no M8, mesmo processo/host da API REST:
 ```text
-https://vault.darckware.net/mcp
+POST /mcp  (Streamable HTTP, stateless; RequireAuthorization — mesmo SmartAuth do M7)
 ```
 
-Tools padrão (§91):
+Tools padrão (§91) — **implementadas no M8** salvo indicação contrária:
+```text
+capability.check
+credential.request          (só accessMode=REVEAL; BROKER/SESSION/LEASE/INJECT — Fase 2/3, NÃO implementado)
+secret.metadata
+```
+
+Tools **NÃO implementadas** (dependem de `CredentialRequest`/`AccessGrant`/`Session`/`Lease`/`Approval`, que não existem — Fase 2/3):
 ```text
 capability.list
-capability.check
-credential.request
 credential.status
 credential.release
 access.request
@@ -79,19 +87,22 @@ session.request
 session.status
 session.close
 approval.status
-secret.metadata
 ```
 
-Tools administrativas:
+Tools administrativas — **implementadas no M8**:
 ```text
 admin.secret.create
 admin.secret.update
 admin.secret.rotate
-admin.secret.revoke
+admin.secret.revoke          (novo em M8: antes disso Secret.Status nunca era definido como Revoked)
+admin.audit.search           (novo em M8, junto de GET /api/v1/audit e Permission.AuditRead)
+```
+
+Tools administrativas **NÃO implementadas** (dependem de um modelo de Policy que não existe — Fase 2/3):
+```text
 admin.policy.create
 admin.policy.update
 admin.policy.assign
-admin.audit.search
 ```
 
 ## 8. Eventos e auditoria
@@ -124,11 +135,13 @@ Nenhuma tela nova — este módulo é inteiramente API/MCP. Visibilidade de Serv
 
 ## 13. Critérios de aceite
 
-| ID | Given | When | Then | Nível |
-|---|---|---|---|---|
-| AC-01 | `service:forgehub` autenticado | solicita credencial com contexto de task válido | autorização avaliada com base no contexto, resultado auditado | Integration |
-| AC-02 | `service:forgerouter` autenticado | solicita API Key de provider | credencial retornada, nenhuma persistência local exigida do lado ForgeVault | Integration |
-| AC-03 | agente comum via MCP | tenta chamar uma tool administrativa | negado | Security |
+| ID | Given | When | Then | Nível | Status |
+|---|---|---|---|---|---|
+| AC-01 | identidade autenticada com `SecretReadValue` no escopo do secret, opcionalmente com `task_id`/`onBehalfOfAgent`/`runtimeSessionRef` | chama `credential.request` via MCP | valor retornado (modo REVEAL), `AuditLog` com ação `SECRET_REVEAL` gravado incluindo o contexto opcional em `Metadata` | Integration | **Satisfeito** — `McpToolsTests.AdminSecretCreate_ThenCredentialRequest_Authorized_RevealsValue_AndAudits` |
+| AC-02 | identidade autenticada sem `SecretReadValue` no escopo do secret | chama `credential.request` via MCP | negado (`McpException("forbidden")`), `AuditLog` com ação `FAILED_ACCESS` gravado, nenhuma resposta ou log contém o valor | Security | **Satisfeito** — `McpToolsTests.CredentialRequest_Unauthorized_Denies_AndAudits_NoLeak` |
+| AC-03 | identidade sem `AuditRead` em nenhum escopo (ex.: role `ReadOnly`) | tenta chamar a tool administrativa `admin.audit.search` | negado (`McpException("forbidden")`) | Security | **Satisfeito** — `McpToolsTests.AdminAuditSearch_DeniesReadOnlyRole_AllowsAuditor_NeverLeaksSecretValues` |
+
+`service:forgehub`/`service:forgerouter` autenticando via Service Account e recuperando credencial já está coberto desde M7 (`ServiceAccountIntegrationTests`) — a via MCP reaproveita a mesma autenticação (`SmartAuth`), então nenhum teste adicional específico de identidade de serviço foi necessário além dos três acima.
 
 ## 14. Plano de entrega
 
@@ -136,13 +149,15 @@ Nenhuma tela nova — este módulo é inteiramente API/MCP. Visibilidade de Serv
 
 ## 15. Definition Gate
 
-- [ ] limites e casos de uso aprovados
-- [ ] entidades/constraints aprovadas
-- [ ] estados/comandos aprovados
-- [ ] Policies/permissões aprovadas
-- [ ] API/eventos aprovados
-- [ ] UI e estados aprovados
-- [ ] migration/rollback aprovados
-- [ ] testes e evidências definidos
-- [ ] observabilidade definida
-- [ ] nenhuma questão bloqueante aberta (**há uma aberta — ver seção 1**)
+Status após M8 — cobre apenas a onda 1 de tools (seção 7); a fatia restante do módulo (Policy Engine, Session/Lease/Approval e as tools que dependem delas) permanece com gate fechado, sem implementação.
+
+- [x] limites e casos de uso aprovados (onda 1 de tools; UC-01/02 completos via Service Accounts existentes, UC-03 completo)
+- [x] entidades/constraints aprovadas (nenhuma entidade nova — reaproveita Secret/AuditLog/RoleAssignment)
+- [x] estados/comandos aprovados (reaproveita o ciclo de vida de Service Account do módulo 02)
+- [x] Policies/permissões aprovadas (`Permission.AuditRead` adicionado à matriz existente do módulo 04)
+- [x] API/eventos aprovados (seção 7 e 8 refletem o que existe)
+- [x] UI e estados aprovados (nenhuma UI nova, conforme seção 9)
+- [x] migration/rollback aprovados (nenhuma migration de schema — `AuditRead` é lógica de aplicação, não coluna nova)
+- [x] testes e evidências definidos (`McpToolsTests.cs`, `AuditAndRevokeEndpointTests.cs` — ver seção 13)
+- [ ] observabilidade definida (`mcp_calls_total`/`credential_requests_total` da seção 11 não foram implementadas neste marco)
+- [x] nenhuma questão bloqueante aberta (fechada no `revision: 2` — ver seção 1)

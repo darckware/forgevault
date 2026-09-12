@@ -1,6 +1,7 @@
 using ForgeVault.Api.Authentication;
 using ForgeVault.Api.Authorization;
 using ForgeVault.Api.Endpoints;
+using ForgeVault.Api.Mcp;
 using ForgeVault.Application.Auth;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Application.Security;
@@ -109,6 +110,14 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("RequireMfa", policy => policy.Requirements.Add(new MfaRequirement()));
 });
 
+// M8 (docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md): native MCP server, same
+// process/host as the REST API. Stateless Streamable HTTP is the SDK-recommended remote
+// transport (no server-side session affinity needed). RequireAuthorization() below reuses
+// SmartAuth as-is — a human JWT or a service:forgehub fv_sa_... token both work unchanged.
+builder.Services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithTools<VaultTools>();
+
 var app = builder.Build();
 
 // Fail fast if the Master Key is missing/misconfigured — same philosophy as JwtOptions'
@@ -134,6 +143,9 @@ app.MapProjectEndpoints();
 app.MapEnvironmentEndpoints();
 app.MapSecretEndpoints();
 app.MapServiceAccountEndpoints();
+app.MapAuditEndpoints();
+
+app.MapMcp("/mcp").RequireAuthorization();
 
 // M0 (docs/architecture/IMPLEMENTATION_READINESS.md): liveness has no DB dependency.
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));

@@ -9,6 +9,9 @@ public enum Permission
     EnvironmentWrite,
     SecretWrite,
     SecretReadValue,
+
+    // M8 (docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md, admin.audit.search).
+    AuditRead,
 }
 
 // Whichever levels of the hierarchy are known for the resource being checked — a
@@ -23,4 +26,9 @@ public interface IPermissionChecker
     // Default deny: returns false whenever no active RoleAssignment in scope grants the
     // permission (docs/modules/04_AUTHORIZATION_AND_POLICY.md §4 invariant 1).
     Task<bool> HasPermissionAsync(Guid identityId, Permission permission, ResourceScope scope, CancellationToken ct);
+
+    // For cross-cutting governance operations that aren't naturally scoped to one
+    // Organization/Project/Environment (M8: admin.audit.search) — true if ANY active
+    // RoleAssignment for this identity, at any scope, grants the permission.
+    Task<bool> HasPermissionAnywhereAsync(Guid identityId, Permission permission, CancellationToken ct);
 }

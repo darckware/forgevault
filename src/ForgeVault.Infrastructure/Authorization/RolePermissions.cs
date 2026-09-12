@@ -7,32 +7,35 @@ namespace ForgeVault.Infrastructure.Authorization;
 // is status: draft and does not (yet) define an exhaustive permission table — this is a
 // documented, deliberately conservative starting point, not a finished policy engine:
 //
-// | Role            | ProjectWrite | EnvironmentWrite | SecretWrite | SecretReadValue |
-// |-----------------|:---:|:---:|:---:|:---:|
-// | Owner           |  x  |  x  |  x  |  x  |
-// | Admin           |  x  |  x  |  x  |  x  |
-// | SecurityAdmin   |     |     |  x  |  x  |
-// | ProjectAdmin    |  x  |  x  |  x  |  x  |
-// | Developer       |     |     |  x  |  x  |
-// | Operator        |     |     |  x  |     |
-// | Auditor         |     |     |     |     |
-// | ReadOnly        |     |     |     |     |
-// | Agent           |     |     |  x  |  x  |
-// | ServiceAccount  |     |     |  x  |  x  |
+// | Role            | ProjectWrite | EnvironmentWrite | SecretWrite | SecretReadValue | AuditRead |
+// |-----------------|:---:|:---:|:---:|:---:|:---:|
+// | Owner           |  x  |  x  |  x  |  x  |  x  |
+// | Admin           |  x  |  x  |  x  |  x  |  x  |
+// | SecurityAdmin   |     |     |  x  |  x  |  x  |
+// | ProjectAdmin    |  x  |  x  |  x  |  x  |     |
+// | Developer       |     |     |  x  |  x  |     |
+// | Operator        |     |     |  x  |     |     |
+// | Auditor         |     |     |     |     |  x  |
+// | ReadOnly        |     |     |     |     |     |
+// | Agent           |     |     |  x  |  x  |     |
+// | ServiceAccount  |     |     |  x  |  x  |     |
 //
-// ReadOnly and Auditor never grant write or reveal, matching
-// docs/modules/04_AUTHORIZATION_AND_POLICY.md §4 invariant 3.
+// ReadOnly never grants anything, matching docs/modules/04_AUTHORIZATION_AND_POLICY.md §4
+// invariant 3. Auditor previously granted nothing at all (a gap from M5 — a role whose
+// entire purpose is reading the audit trail couldn't actually do so); M8 closes that by
+// granting AuditRead, without also granting SecretReadValue/SecretWrite — an auditor reads
+// records of what happened, it does not gain the ability to act.
 internal static class RolePermissions
 {
     private static readonly Dictionary<Role, Permission[]> Matrix = new()
     {
-        [Role.Owner] = [Permission.ProjectWrite, Permission.EnvironmentWrite, Permission.SecretWrite, Permission.SecretReadValue],
-        [Role.Admin] = [Permission.ProjectWrite, Permission.EnvironmentWrite, Permission.SecretWrite, Permission.SecretReadValue],
-        [Role.SecurityAdmin] = [Permission.SecretWrite, Permission.SecretReadValue],
+        [Role.Owner] = [Permission.ProjectWrite, Permission.EnvironmentWrite, Permission.SecretWrite, Permission.SecretReadValue, Permission.AuditRead],
+        [Role.Admin] = [Permission.ProjectWrite, Permission.EnvironmentWrite, Permission.SecretWrite, Permission.SecretReadValue, Permission.AuditRead],
+        [Role.SecurityAdmin] = [Permission.SecretWrite, Permission.SecretReadValue, Permission.AuditRead],
         [Role.ProjectAdmin] = [Permission.ProjectWrite, Permission.EnvironmentWrite, Permission.SecretWrite, Permission.SecretReadValue],
         [Role.Developer] = [Permission.SecretWrite, Permission.SecretReadValue],
         [Role.Operator] = [Permission.SecretWrite],
-        [Role.Auditor] = [],
+        [Role.Auditor] = [Permission.AuditRead],
         [Role.ReadOnly] = [],
         [Role.Agent] = [Permission.SecretWrite, Permission.SecretReadValue],
         [Role.ServiceAccount] = [Permission.SecretWrite, Permission.SecretReadValue],
