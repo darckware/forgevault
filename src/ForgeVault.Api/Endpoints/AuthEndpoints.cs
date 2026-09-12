@@ -11,8 +11,13 @@ public static class AuthEndpoints
     {
         var group = app.MapGroup("/api/v1/auth");
 
-        group.MapPost("/login", async (LoginRequest request, IAuthService authService, CancellationToken ct) =>
+        group.MapPost("/login", async (LoginRequest request, IAuthService authService, IRecaptchaVerifier recaptcha, CancellationToken ct) =>
         {
+            if (!await recaptcha.VerifyAsync(request.RecaptchaToken, ct))
+            {
+                return Results.Json(new ErrorResponse("recaptcha_failed"), statusCode: StatusCodes.Status401Unauthorized);
+            }
+
             var outcome = await authService.LoginAsync(request.Email, request.Password, request.MfaCode, ct);
             return ToHttpResult(outcome);
         });
@@ -59,7 +64,7 @@ public static class AuthEndpoints
     };
 }
 
-public sealed record LoginRequest(string Email, string Password, string? MfaCode);
+public sealed record LoginRequest(string Email, string Password, string? MfaCode, string? RecaptchaToken = null);
 
 public sealed record RefreshRequest(string RefreshToken);
 

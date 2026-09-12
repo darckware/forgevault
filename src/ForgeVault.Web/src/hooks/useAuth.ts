@@ -7,6 +7,7 @@ export interface LoginPayload {
   email: string;
   password: string;
   mfaCode?: string;
+  recaptchaToken?: string | null;
 }
 
 export function useLogin() {

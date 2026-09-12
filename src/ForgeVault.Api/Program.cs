@@ -50,6 +50,11 @@ builder.Services.AddScoped<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
+// Login-screen reCAPTCHA (same pattern as ForgeHub/Darckware): fail-open until
+// Recaptcha:SecretKey is actually provisioned for this domain.
+builder.Services.Configure<RecaptchaOptions>(builder.Configuration.GetSection("Recaptcha"));
+builder.Services.AddHttpClient<IRecaptchaVerifier, RecaptchaVerifier>();
+
 // M5 (docs/architecture/IMPLEMENTATION_READINESS.md): RBAC over Project/Environment/Secret
 // writes and the Secret reveal endpoint.
 builder.Services.AddScoped<IPermissionChecker, PermissionChecker>();
