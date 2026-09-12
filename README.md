@@ -13,7 +13,7 @@
   <a href="https://github.com/marcelodarckferreira/forgevault/actions/workflows/ci.yml"><img src="https://github.com/marcelodarckferreira/forgevault/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/PostgreSQL-17-336791" alt="PostgreSQL 17">
-  <img src="https://img.shields.io/badge/status-Onda%201%20(MVP)%20%2B%20M8-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/status-Onda%201%20(MVP)%20%2B%20M8%2FM9-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License">
 </p>
 
@@ -146,16 +146,25 @@ POST                /api/v1/secrets/{id}/revoke                            RBAC:
 `mode` já existe no contrato de leitura mesmo com só `REVEAL` implementado, para que
 `BROKER`/`SESSION`/`LEASE`/`INJECT` sejam aditivos quando chegarem.
 
-### Service Accounts e Auditoria
+### Service Accounts, Auditoria e Gestão de Acesso (M9)
 
 ```text
-POST /api/v1/service-accounts                        cria a identidade de serviço
-POST /api/v1/service-accounts/{id}/tokens             emite um token fv_sa_... (mostrado uma vez)
+POST /api/v1/service-accounts                              cria a identidade de serviço
+POST /api/v1/service-accounts/{id}/tokens                  emite um token fv_sa_... (mostrado uma vez)
 POST /api/v1/service-accounts/{id}/tokens/{id}/revoke
 GET  /api/v1/service-accounts
 
-GET  /api/v1/audit                                    RBAC: AuditRead (checado em qualquer escopo)
+GET  /api/v1/audit                                         RBAC: AuditRead (checado em qualquer escopo)
+
+POST /api/v1/identities/{identityId}/role-assignments       RBAC: RoleAssignmentWrite no escopo concedido
+GET  /api/v1/identities/{identityId}/role-assignments        RBAC: RoleAssignmentWrite em qualquer escopo
+POST /api/v1/role-assignments/{id}/revoke                   RBAC: RoleAssignmentWrite no escopo do assignment
 ```
+
+Até o M8, conceder um `RoleAssignment` (dar acesso a alguém) exigia inserção direta no banco
+— o `POST /api/v1/identities/{id}/role-assignments` acima fecha esse gargalo. Só `Owner`/`Admin`
+concedem/revogam acesso (`Permission.RoleAssignmentWrite`); a concessão é idempotente por
+`(identidade, role, escopo)`.
 
 ### MCP Server
 
@@ -173,10 +182,35 @@ POST /mcp   (Streamable HTTP, stateless)
 | `capability.check` | simula uma permissão sem executar nem revelar nada |
 | `admin.secret.create` / `update` / `rotate` / `revoke` | ciclo de vida completo de um secret |
 | `admin.audit.search` | busca na trilha de auditoria |
+| `admin.role.grant` / `revoke` (M9) | concede/revoga um `RoleAssignment` — mesma RBAC de `RoleAssignmentWrite` do endpoint REST equivalente |
+| `admin.agent.register` (M9) | **onboarding de agente em uma única chamada**: cria a `ServiceAccount`, emite seu token `fv_sa_...` e concede o role — ver "Registrando um agente" abaixo |
 
 Toda tool reaproveita exatamente os mesmos serviços dos endpoints REST equivalentes — nenhuma
 lógica de autorização ou auditoria duplicada. Ver `docs/architecture/INTEGRATION_CONTRACT_MVP.md`
 para um exemplo de chamada completo.
+
+#### Registrando um agente (M9)
+
+Fluxo completo para um agente cadastrar, via MCP, as credenciais que já tem em mãos:
+
+```jsonc
+// 1. Um Owner/Admin registra o agente (identidade + token + acesso, em uma chamada):
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+  "name":"admin.agent.register",
+  "arguments":{"name":"agent-athos","scopeType":"Environment","scopeId":"<environment.id>"}
+}}
+// -> retorna {"token":"fv_sa_...", "role":"Agent", ...} — o token só aparece aqui, uma vez.
+
+// 2. O agente usa SEU PRÓPRIO token pra cadastrar uma credencial que já tinha:
+// Authorization: Bearer fv_sa_...
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+  "name":"admin.secret.create",
+  "arguments":{"environmentId":"<environment.id>","name":"OPENAI_API_KEY","type":"ApiKey","value":"sk-..."}
+}}
+```
+
+O agente registrado nunca recebe `RoleAssignmentWrite` — não pode conceder acesso a si mesmo
+nem a mais ninguém; só quem já é Owner/Admin no escopo pode registrar novos agentes.
 
 ## Segurança
 
@@ -210,7 +244,9 @@ cada push/PR.
 
 **Onda 1 (MVP)** completa — scaffold, criptografia, autenticação/MFA, Secrets CRUD,
 RBAC/auditoria, rotação/expiração, Service Accounts e backup/restore. **Onda 2, M8** completa
-— MCP Server nativo e o contrato de contexto ForgeHub/ForgeRouter fechado. Detalhe marco a
+— MCP Server nativo e o contrato de contexto ForgeHub/ForgeRouter fechado. **M9** completa —
+gestão de `RoleAssignment` via API/MCP e onboarding de agente em uma chamada, fechando o
+gargalo de concessão de acesso que antes exigia inserção direta no banco. Detalhe marco a
 marco em `docs/architecture/IMPLEMENTATION_READINESS.md`.
 
 Fora do escopo atual, por decisão explícita (não esquecimento) — ver

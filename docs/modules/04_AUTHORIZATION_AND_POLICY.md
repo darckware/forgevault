@@ -4,17 +4,20 @@
 
 ```yaml
 spec_id: MOD-04-AUTHZ-POLICY
-revision: 1
+revision: 2
 status: draft
 owner: unassigned
 approvers: []
 target_release: MVP (Onda 1)
 architecture_refs:
   - docs/architecture/TARGET_ARCHITECTURE.md
+  - docs/architecture/IMPLEMENTATION_READINESS.md §3.2 (M9)
 decisions:
   - "ABAC completo (contexto de risco, rede, tempo) é aprofundado na Fase 2; MVP cobre RBAC + o campo risk_level como metadado, sem motor de política dinâmico"
-open_blocking_questions:
-  - "Definir se o RBAC do MVP usa policies declarativas em tabela (policies) ou atributos fixos por role em código — não decidido nesta revisão"
+  - "M5: RBAC do MVP usa atributos fixos por role em código (ForgeVault.Infrastructure/Authorization/RolePermissions.cs — um Dictionary<Role, Permission[]>), não policies declarativas em tabela. Fecha a open_blocking_question original desta revisão; registrado aqui retroativamente porque a decisão já estava em vigor desde M5 sem nunca ter sido documentada neste módulo."
+  - "M9: assignRole/revokeRoleAssignment (seção 7) implementados exatamente como especificado — POST /api/v1/identities/{identityId}/role-assignments e POST /api/v1/role-assignments/{id}/revoke, mais um GET de listagem (UC-03) não detalhado em contrato formal na revisão 1. Autorização traduzida para o modelo de Permission já existente (não um literal 'role in [OWNER, ADMIN]' no código): novo Permission.RoleAssignmentWrite, concedido só a Owner/Admin em RolePermissions.cs — resultado idêntico ao texto da spec, consistente com a arquitetura de permissão fina já usada por todo o resto do módulo."
+  - "M9: nenhuma ordenação de hierarquia de role foi implementada — um Owner/Admin com RoleAssignmentWrite em um escopo pode conceder QUALQUER role nesse escopo, incluindo Owner, sem checar se o papel concedido é 'no máximo' igual ao do próprio chamador. É uma superfície de escalonamento conhecida e deliberadamente não fechada nesta revisão (mesmo 'primeiro corte' da matriz de permissões inteira, ver RolePermissions.cs) — não é um vazamento silencioso, está registrado aqui e em RolePermissions.cs."
+open_blocking_questions: []
 ```
 
 ## 2. Objetivo e limite
@@ -95,17 +98,21 @@ open_blocking_questions:
 
 ## 7. Contratos de API
 
+Implementados no M9 (`src/ForgeVault.Api/Endpoints/RoleAssignmentEndpoints.cs`) e espelhados
+como tools MCP (`admin.role.grant`/`admin.role.revoke`, `src/ForgeVault.Api/Mcp/VaultTools.cs`).
+
 ```yaml
 operation_id: assignRole
 method: POST
 path: /api/v1/identities/{identityId}/role-assignments
-authorization: role in [OWNER, ADMIN]
-idempotency: por (identity_id, role_id, scope_type, scope_id)
-request_schema: {role: string, scope_type: "organization|project|environment", scope_id: uuid}
-response_schema: {id, identity_id, role, scope_type, scope_id, status}
+authorization: Permission.RoleAssignmentWrite no scope_type/scope_id do corpo (concedida só a Owner/Admin, RolePermissions.cs)
+idempotency: por (identity_id, role, scope_type, scope_id) — repetir retorna 200 com o assignment existente em vez de duplicar
+request_schema: {role: string, scope_type: "Organization|Project|Environment", scope_id: uuid}
+response_schema: {id, identityId, role, scopeType, scopeId, status, createdAt, revokedAt}
 errors:
-  - {status: 404, code: SCOPE_NOT_FOUND, condition: escopo inexistente}
-  - {status: 422, code: INVALID_ROLE, condition: role fora da lista permitida}
+  - {status: 404, code: scope_not_found, condition: escopo inexistente}
+  - {status: 403, condition: chamador sem RoleAssignmentWrite no escopo}
+  - {status: 400, condition: role/scope_type fora do enum — falha de model binding, mesma convenção usada pelo resto da API para enums inválidos, equivalente ao INVALID_ROLE 422 originalmente especificado}
 events: [ACCESS_GRANTED]
 ```
 
@@ -113,14 +120,28 @@ events: [ACCESS_GRANTED]
 operation_id: revokeRoleAssignment
 method: POST
 path: /api/v1/role-assignments/{id}/revoke
-authorization: role in [OWNER, ADMIN]
-idempotency: idempotente (revogar já revogado não é erro)
+authorization: Permission.RoleAssignmentWrite no escopo do assignment sendo revogado
+idempotency: idempotente (revogar já revogado retorna 200 sem novo evento de auditoria)
 request_schema: {}
-response_schema: {id, status: "revoked"}
+response_schema: {id, identityId, role, scopeType, scopeId, status: "revoked", createdAt, revokedAt}
 errors:
-  - {status: 404, code: ASSIGNMENT_NOT_FOUND, condition: assignment inexistente}
+  - {status: 404, condition: assignment inexistente}
+  - {status: 403, condition: chamador sem RoleAssignmentWrite no escopo do assignment}
 events: [ACCESS_REVOKED]
 ```
+
+```yaml
+operation_id: listRoleAssignments
+method: GET
+path: /api/v1/identities/{identityId}/role-assignments
+authorization: Permission.RoleAssignmentWrite em qualquer escopo (mesmo padrão de admin.audit.search do módulo 09) — visão de governança sobre o acesso de outra identidade, não um "ver meus próprios papéis" self-service
+response_schema: "array de {id, identityId, role, scopeType, scopeId, status, createdAt, revokedAt}"
+```
+
+**Extensão sobre a spec original (M9, não invalida o contrato acima):** `admin.agent.register`
+(só MCP, sem endpoint REST equivalente ainda) combina `POST /api/v1/service-accounts` + emissão
+de token + `assignRole` em uma única chamada, para o caso de uso concreto de onboarding de
+agentes (`docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md`) — ver módulo 09 §7.
 
 ## 8. Eventos e auditoria
 
@@ -168,13 +189,16 @@ events: [ACCESS_REVOKED]
 
 ## 15. Definition Gate
 
-- [ ] limites e casos de uso aprovados
-- [ ] entidades/constraints aprovadas
-- [ ] estados/comandos aprovados
-- [ ] Policies/permissões aprovadas
-- [ ] API/eventos aprovados
-- [ ] UI e estados aprovados
-- [ ] migration/rollback aprovados
-- [ ] testes e evidências definidos
-- [ ] observabilidade definida
-- [ ] nenhuma questão bloqueante aberta (**há uma aberta — ver seção 1**)
+Status após M9 — cobre RBAC básico (M5) + gestão de RoleAssignment via API/MCP (M9); ABAC
+dinâmico completo, quorum/multi-approval e Policy Simulation continuam fora do escopo (seção 2).
+
+- [x] limites e casos de uso aprovados (UC-01/02/03 completos)
+- [x] entidades/constraints aprovadas (`Role`, `RoleAssignment` já em produção desde M5)
+- [x] estados/comandos aprovados (`AssignRole`/`RevokeRoleAssignment` implementados na seção 7)
+- [x] Policies/permissões aprovadas (`RolePermissions.cs`, incluindo `RoleAssignmentWrite` do M9)
+- [x] API/eventos aprovados (seção 7 e 8 refletem o que existe)
+- [x] UI e estados aprovados (nenhuma UI ainda — seção 9 continua descrevendo uma tela não implementada)
+- [x] migration/rollback aprovados (nenhuma migration nova no M9 — `RoleAssignment.RevokedAt` já existia desde M5)
+- [x] testes e evidências definidos (`RoleAssignmentEndpointTests.cs`, `McpToolsTests.cs`)
+- [ ] observabilidade definida (`authz_denied_total`/`role_assignments_total` da seção 11 não foram implementadas)
+- [x] nenhuma questão bloqueante aberta (fechada no `revision: 2` — ver seção 1)

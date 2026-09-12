@@ -19,7 +19,7 @@ namespace ForgeVault.E2E.Tests;
 public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
 {
     [Fact]
-    public async Task ToolsList_ReturnsAllEightPlannedTools()
+    public async Task ToolsList_ReturnsAllPlannedTools()
     {
         var (client, ownerId) = await CreateAuthenticatedClientAsync();
         _ = ownerId;
@@ -29,8 +29,9 @@ public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : ICla
         Assert.Equal(
             new[]
             {
-                "admin.audit.search", "admin.secret.create", "admin.secret.revoke", "admin.secret.rotate",
-                "admin.secret.update", "capability.check", "credential.request", "secret.metadata",
+                "admin.agent.register", "admin.audit.search", "admin.role.grant", "admin.role.revoke",
+                "admin.secret.create", "admin.secret.revoke", "admin.secret.rotate", "admin.secret.update",
+                "capability.check", "credential.request", "secret.metadata",
             },
             names.OrderBy(n => n, StringComparer.Ordinal));
     }
@@ -208,6 +209,106 @@ public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : ICla
 
         var page = JsonDocument.Parse(allowedText!).RootElement;
         Assert.True(page.GetProperty("total").GetInt32() >= 1);
+    }
+
+    [Fact]
+    public async Task AdminAgentRegister_ThenTheAgentRegistersItsOwnCredential_EndToEnd()
+    {
+        // This is the actual onboarding loop the M9 tools exist for: an Owner/Admin
+        // registers an agent identity in one call (ServiceAccount + token + role grant),
+        // and the agent then uses ITS OWN freshly-issued token — not the owner's — to
+        // register a credential it already holds, via admin.secret.create.
+        const string credentialValue = "sk-agent-holds-this-already";
+
+        var (owner, ownerId) = await CreateAuthenticatedClientAsync();
+        var environmentId = await CreateOrgProjectEnvironmentAsync(owner, ownerId);
+
+        var (deniedRegisterIsError, _) = await CallToolAsync(owner, "admin.agent.register", new
+        {
+            name = $"agent-{Guid.NewGuid():N}",
+            scopeType = "Environment",
+            scopeId = Guid.NewGuid(),
+        });
+        Assert.True(deniedRegisterIsError); // scope_not_found for a random environment id.
+
+        var (registerIsError, registerText) = await CallToolAsync(owner, "admin.agent.register", new
+        {
+            name = $"agent-{Guid.NewGuid():N}",
+            scopeType = "Environment",
+            scopeId = environmentId,
+        });
+        Assert.False(registerIsError);
+        var registration = JsonDocument.Parse(registerText!).RootElement;
+        var agentToken = registration.GetProperty("token").GetString();
+        Assert.StartsWith("fv_sa_", agentToken, StringComparison.Ordinal);
+        Assert.Equal("Agent", registration.GetProperty("role").GetString());
+
+        var agentClient = factory.CreateClient();
+        agentClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", agentToken);
+
+        var (createIsError, createText) = await CallToolAsync(agentClient, "admin.secret.create", new
+        {
+            environmentId,
+            name = "AGENT_OWN_CREDENTIAL",
+            type = "ApiKey",
+            value = credentialValue,
+        });
+        Assert.False(createIsError);
+        var created = JsonDocument.Parse(createText!).RootElement;
+        var secretId = created.GetProperty("id").GetGuid();
+
+        // The agent cannot grant itself (or anyone else) a role — RoleAssignmentWrite was
+        // never part of what admin.agent.register granted it.
+        var (escalationIsError, escalationText) = await CallToolAsync(agentClient, "admin.role.grant", new
+        {
+            identityId = registration.GetProperty("serviceAccountId").GetGuid(),
+            role = "Owner",
+            scopeType = "Environment",
+            scopeId = environmentId,
+        });
+        Assert.True(escalationIsError);
+        Assert.Contains("forbidden", escalationText, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        var createLog = await db.AuditLogs.SingleAsync(a => a.ResourceId == secretId && a.Action == "SECRET_CREATE");
+        Assert.Equal(registration.GetProperty("serviceAccountId").GetGuid().ToString(), createLog.ActorId);
+        Assert.Equal(AuditActorType.Service, createLog.ActorType);
+    }
+
+    [Fact]
+    public async Task AdminRoleGrantAndRevoke_ViaMcp_AreRbacGated()
+    {
+        var (owner, ownerId) = await CreateAuthenticatedClientAsync();
+        var (stranger, _) = await CreateAuthenticatedClientAsync();
+        var (_, granteeId) = await CreateAuthenticatedClientAsync();
+        var environmentId = await CreateOrgProjectEnvironmentAsync(owner, ownerId);
+
+        var (deniedIsError, deniedText) = await CallToolAsync(stranger, "admin.role.grant", new
+        {
+            identityId = granteeId,
+            role = "Developer",
+            scopeType = "Environment",
+            scopeId = environmentId,
+        });
+        Assert.True(deniedIsError);
+        Assert.Contains("forbidden", deniedText, StringComparison.Ordinal);
+
+        var (grantIsError, grantText) = await CallToolAsync(owner, "admin.role.grant", new
+        {
+            identityId = granteeId,
+            role = "Developer",
+            scopeType = "Environment",
+            scopeId = environmentId,
+        });
+        Assert.False(grantIsError);
+        var grant = JsonDocument.Parse(grantText!).RootElement;
+        var assignmentId = grant.GetProperty("id").GetGuid();
+        Assert.Equal("active", grant.GetProperty("status").GetString());
+
+        var (revokeIsError, revokeText) = await CallToolAsync(owner, "admin.role.revoke", new { roleAssignmentId = assignmentId });
+        Assert.False(revokeIsError);
+        Assert.Equal("revoked", JsonDocument.Parse(revokeText!).RootElement.GetProperty("status").GetString());
     }
 
     private static async Task<List<string>> ListToolNamesAsync(HttpClient client)

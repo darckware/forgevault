@@ -1,6 +1,6 @@
-# ForgeVault — Contrato de Integração (MVP M7 + MCP M8)
+# ForgeVault — Contrato de Integração (MVP M7 + MCP M8 + Gestão de Acesso M9)
 
-> **Status documental:** descreve os dois mecanismos de integração realmente implementados — REST (Onda 1/M7) e MCP nativo (M8, onda 1 de tools). A visão completa (tools `access.*`/`session.*`/`approval.status`/`admin.policy.*`, propagação de contexto operacional para autorização) continua em `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` — Fase 2/3, ainda não implementada. Este documento é o contrato **já funcional** que ForgeHub/ForgeRouter podem usar hoje, por qualquer uma das duas vias.
+> **Status documental:** descreve os mecanismos de integração realmente implementados — REST (Onda 1/M7), MCP nativo (M8, onda 1 de tools) e gestão de `RoleAssignment`/onboarding de agente via API/MCP (M9). A visão completa (tools `access.*`/`session.*`/`approval.status`/`admin.policy.*`, propagação de contexto operacional para autorização) continua em `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` — Fase 2/3, ainda não implementada. Este documento é o contrato **já funcional** que ForgeHub/ForgeRouter podem usar hoje, por qualquer uma das vias.
 
 ## 1. Identidade
 
@@ -36,14 +36,21 @@ O ForgeVault distingue automaticamente um token de serviço (`fv_sa_...`) de um 
 
 ## 3. Autorização
 
-Uma `ServiceAccount` só acessa o que um `RoleAssignment` conceder a ela — exatamente o mesmo modelo RBAC de um usuário humano (`docs/modules/04_AUTHORIZATION_AND_POLICY.md`). Não há atalho de "confiar automaticamente em serviços". Hoje isso também exige inserção direta no banco (mesma limitação do M5):
+Uma `ServiceAccount` só acessa o que um `RoleAssignment` conceder a ela — exatamente o mesmo modelo RBAC de um usuário humano (`docs/modules/04_AUTHORIZATION_AND_POLICY.md`). Não há atalho de "confiar automaticamente em serviços".
 
-```sql
-INSERT INTO role_assignments (id, identity_id, role, scope_type, scope_id, created_at)
-VALUES (gen_random_uuid(), '<service_account.id>', 'ServiceAccount', 'Organization', '<organization.id>', now());
+Desde o M9, conceder esse `RoleAssignment` não exige mais inserção direta no banco — um Owner/Admin (humano ou outra `ServiceAccount` com `RoleAssignmentWrite`) faz isso via API ou MCP:
+
+```http
+POST /api/v1/identities/{service_account.id}/role-assignments
+Authorization: Bearer <jwt de um Owner ou Admin>
+Content-Type: application/json
+
+{"role": "ServiceAccount", "scopeType": "Environment", "scopeId": "<environment.id>"}
 ```
 
-Recomendação: conceder o menor escopo possível (Environment, não Organization) para uma integração de produção real — o exemplo acima usa Organization por brevidade.
+Equivalente via MCP: tool `admin.role.grant` com os mesmos campos (`identityId`, `role`, `scopeType`, `scopeId`) — ver seção 7.
+
+Recomendação: conceder o menor escopo possível (Environment, não Organization) para uma integração de produção real — o exemplo acima já segue essa recomendação.
 
 ## 4. Fluxo ForgeHub (autenticação)
 
@@ -91,12 +98,31 @@ Accept: application/json, text/event-stream
 }}
 ```
 
-Tools disponíveis hoje: `secret.metadata`, `credential.request` (só `REVEAL`), `capability.check`, `admin.secret.create/update/rotate/revoke`, `admin.audit.search` — ver `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` §7 para a lista completa incluindo o que ainda não existe. Erros de negócio/autorização chegam como `CallToolResult` com `isError: true` e a mensagem em `content[0].text` (lançar `McpException` dentro da tool, não deixar vazar outra exceção).
+Tools disponíveis hoje: `secret.metadata`, `credential.request` (só `REVEAL`), `capability.check`, `admin.secret.create/update/rotate/revoke`, `admin.audit.search`, `admin.role.grant/revoke` e `admin.agent.register` (M9) — ver `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` §7 para a lista completa incluindo o que ainda não existe. Erros de negócio/autorização chegam como `CallToolResult` com `isError: true` e a mensagem em `content[0].text` (lançar `McpException` dentro da tool, não deixar vazar outra exceção).
+
+### Onboarding de agente em uma chamada (M9)
+
+Um Owner/Admin registra um agente novo — identidade, token e permissão — em uma única
+chamada MCP, sem inserção manual no banco:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+  "name":"admin.agent.register",
+  "arguments":{"name":"agent-athos","scopeType":"Environment","scopeId":"<environment.id>"}
+}}
+```
+
+Resposta inclui `token` (`fv_sa_...`, mostrado uma única vez — o agente deve guardá-lo
+imediatamente). A partir daí o próprio agente, com seu próprio token, chama
+`admin.secret.create` para cadastrar as credenciais que já tinha em mãos, e
+`credential.request` para recuperá-las depois. O agente nunca recebe `RoleAssignmentWrite`
+neste fluxo — não pode conceder papéis a si mesmo nem a ninguém.
 
 ## 6. O que ainda não existe (Fase 2/3+)
 
 - Tools MCP de `access.*`/`session.*`/`approval.status`/`admin.policy.*` e modos de acesso além de REVEAL (BROKER/SESSION/LEASE/INJECT) — dependem de `CredentialRequest`/`AccessGrant`/`Session`/`Lease`/`Approval`/Policy Engine, que não existem.
 - Propagação de contexto operacional (task/project) do ForgeHub para *decisões* de autorização (ABAC) — hoje `taskId`/`onBehalfOfAgent`/`runtimeSessionRef` só chegam como metadado de auditoria (M8, seção 7 acima).
-- Endpoint de gestão de `RoleAssignment`/`ServiceAccount` via UI — hoje é inserção direta no banco.
+- Gestão de `RoleAssignment`/`ServiceAccount` via **UI** — via API/MCP já existe desde o M9 (seção 3 e 7 acima); só a tela mesmo não foi construída.
+- Hierarquia entre roles ao conceder acesso — `RoleAssignmentWrite` (M9) não impede um Owner/Admin de conceder qualquer role, incluindo Owner, no escopo onde tem a permissão (ver `docs/modules/04_AUTHORIZATION_AND_POLICY.md` §1, decisão registrada).
 - `correlation_id` propagado ponta a ponta entre Hermes → ForgeHub → ForgeVault → terceiro (`docs/ForgeVault.md` §113) — o `AuditLog` já tem a coluna, mas nada a preenche ainda.
 - Métricas `mcp_calls_total`/`credential_requests_total` (módulo 09 §11) — não implementadas neste marco.

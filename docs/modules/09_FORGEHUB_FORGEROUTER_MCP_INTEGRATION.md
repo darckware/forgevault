@@ -105,6 +105,15 @@ admin.policy.update
 admin.policy.assign
 ```
 
+Tools adicionais, hospedadas no mesmo `VaultTools.cs`/servidor MCP mas pertencentes ao módulo
+`04` (gestão de `RoleAssignment`), **implementadas no M9** — não fazem parte do catálogo
+original deste módulo, ver `docs/modules/04_AUTHORIZATION_AND_POLICY.md` §7 para o contrato:
+```text
+admin.role.grant
+admin.role.revoke
+admin.agent.register    (extensão sobre a spec do módulo 04 — onboarding de agente em uma chamada)
+```
+
 ## 8. Eventos e auditoria
 
 | Evento | Producer | Payload | Retention |

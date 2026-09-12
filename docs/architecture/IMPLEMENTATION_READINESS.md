@@ -58,6 +58,28 @@ Primeiro marco além do MVP, cobrindo a fatia do módulo `09` que já tem lógic
 
 Testes: `tests/E2E/ForgeVault.E2E.Tests/McpToolsTests.cs` (chamadas JSON-RPC cruas sobre `HttpClient`/`WebApplicationFactory`, sem client MCP dedicado) cobrindo os AC-01/02/03 do módulo `09` em formato MCP; `tests/Security/ForgeVault.Security.Tests/AuditAndRevokeEndpointTests.cs` cobrindo os dois endpoints REST novos com o mesmo padrão de asserção "nenhum vazamento" de `RbacRevealAuditTests`.
 
+## 3.2. Marco de Engenharia da Onda 2 — M9 (gestão de RoleAssignment + onboarding de agentes)
+
+Motivado por uma necessidade operacional concreta: até o M8, o único jeito de conceder acesso
+a uma nova identidade (humana ou agente) era um `INSERT` direto no banco — um gargalo real
+para onboarding de agentes em escala, documentado como limitação desde M5.
+
+| Entrega | Detalhe |
+|---|---|
+| `assignRole`/`revokeRoleAssignment`/listagem (módulo 04 §7, já especificados desde a revisão 1, nunca implementados) | `POST /api/v1/identities/{identityId}/role-assignments`, `POST /api/v1/role-assignments/{id}/revoke`, `GET /api/v1/identities/{identityId}/role-assignments` — mesma lógica espelhada como tools MCP `admin.role.grant`/`admin.role.revoke` |
+| `Permission.RoleAssignmentWrite` | novo na matriz (`RolePermissions.cs`), concedido só a `Owner`/`Admin` — tradução literal do "role in [OWNER, ADMIN]" do módulo 04 §7 para o modelo de permissão fina já usado pelo resto do sistema |
+| `admin.agent.register` (só MCP, extensão sobre a spec) | onboarding de agente em uma única chamada: cria a `ServiceAccount`, emite o token `fv_sa_...` (mostrado uma vez) e concede o `RoleAssignment`, tudo atômico na mesma transação. Só quem já tem `RoleAssignmentWrite` no escopo alvo pode chamá-la — um agente nunca se auto-registra |
+| Fechamento retroativo de uma `open_blocking_question` do módulo 04 | "policies em tabela vs. atributos fixos por role em código" já estava decidido na prática desde M5 (`RolePermissions.cs` é um `Dictionary` em código), só nunca tinha sido registrado formalmente no módulo — corrigido no M9 |
+| Superfície de escalonamento conhecida, documentada e não fechada | `RoleAssignmentWrite` não impõe hierarquia entre roles — um Owner/Admin pode conceder qualquer role, incluindo Owner, no escopo onde tem `RoleAssignmentWrite`. Mesmo "primeiro corte" de toda a matriz de permissões, não uma regressão introduzida pelo M9 |
+
+Testes: `tests/Security/ForgeVault.Security.Tests/RoleAssignmentEndpointTests.cs` (RBAC,
+idempotência, efeito real do revoke sobre uma permissão concedida, listagem gated) e os casos
+adicionados a `tests/E2E/ForgeVault.E2E.Tests/McpToolsTests.cs`
+(`AdminAgentRegister_ThenTheAgentRegistersItsOwnCredential_EndToEnd` prova o fluxo completo:
+um Owner registra um agente, o agente usa **seu próprio token recém-emitido** — não o do
+Owner — para cadastrar uma credencial que já tinha via `admin.secret.create`, e o agente
+tentando se auto-promover a `Owner` via `admin.role.grant` é negado).
+
 ## 4. Decisões de Design Já Fixadas para a Onda 1
 
 - **Modelo de dados**: `Organization → Project → Environment → Secret → SecretVersion → AuditLog` (§11), não o modelo multi-tenant de §81/§107. Justificativa: o próprio roadmap (§63) coloca "multi-tenant avançado" na Fase 4; o modelo simples satisfaz literalmente todos os critérios de aceite do MVP; migrar para `Tenant/Workspace` depois é aditivo (inserir camada acima), enquanto o caminho inverso seria disruptivo. Nomenclatura de `secret_versions` segue a DDL de §83 (`ciphertext`, `encrypted_dek`, `nonce`, `auth_tag`, `algorithm`), não os nomes mais antigos de §11.

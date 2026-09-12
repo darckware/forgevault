@@ -6,6 +6,7 @@ using ForgeVault.Api.Endpoints;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Application.Security;
 using ForgeVault.Domain.Entities;
+using ForgeVault.Infrastructure.Auth;
 using ForgeVault.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol;
@@ -442,6 +443,194 @@ public sealed class VaultTools
 
         return new AuditLogPage(items, effectivePage, effectivePageSize, total);
     }
+
+    [McpServerTool(Name = "admin.role.grant")]
+    [Description("Grants a role to an identity (a User or ServiceAccount id) at a scope (Organization/Project/Environment). RBAC gated by RoleAssignmentWrite (Owner/Admin) at that scope. Idempotent for the same (identity, role, scope).")]
+    public static async Task<object> AdminRoleGrantAsync(
+        [Description("Identity to grant the role to (a User or ServiceAccount id)")] Guid identityId,
+        [Description("Role name: Owner, Admin, SecurityAdmin, ProjectAdmin, Developer, Operator, Auditor, ReadOnly, Agent, ServiceAccount")] string role,
+        [Description("Scope type: Organization, Project, or Environment")] string scopeType,
+        [Description("Id of the Organization/Project/Environment matching scopeType")] Guid scopeId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var (parsedRole, parsedScopeType) = ParseRoleAndScopeTypeOrThrow(role, scopeType);
+
+        var scope = await RoleAssignmentScopeResolver.ResolveAsync(db, parsedScopeType, scopeId, ct);
+        if (scope is null)
+        {
+            throw new McpException("scope_not_found");
+        }
+
+        var callerId = user.GetUserId();
+        if (!await permissions.HasPermissionAsync(callerId, Permission.RoleAssignmentWrite, scope, ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        // Idempotency by (identity_id, role, scope_type, scope_id) — module 04 §7.
+        var existing = await db.RoleAssignments.SingleOrDefaultAsync(r =>
+            r.IdentityId == identityId && r.Role == parsedRole &&
+            r.ScopeType == parsedScopeType && r.ScopeId == scopeId &&
+            r.RevokedAt == null, ct);
+        if (existing is not null)
+        {
+            return ToRoleAssignmentObject(existing);
+        }
+
+        var assignment = new RoleAssignment
+        {
+            Id = Guid.NewGuid(),
+            IdentityId = identityId,
+            Role = parsedRole,
+            ScopeType = parsedScopeType,
+            ScopeId = scopeId,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        db.RoleAssignments.Add(assignment);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "ACCESS_GRANTED", "role_assignment", assignment.Id, NewRequestId()));
+        await db.SaveChangesAsync(ct);
+
+        return ToRoleAssignmentObject(assignment);
+    }
+
+    [McpServerTool(Name = "admin.role.revoke")]
+    [Description("Revokes a RoleAssignment by id — the identity immediately loses whatever that grant provided. Idempotent.")]
+    public static async Task<object> AdminRoleRevokeAsync(
+        Guid roleAssignmentId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var assignment = await db.RoleAssignments.FindAsync([roleAssignmentId], ct);
+        if (assignment is null)
+        {
+            throw new McpException("role_assignment_not_found");
+        }
+
+        var scope = await RoleAssignmentScopeResolver.ResolveAsync(db, assignment.ScopeType, assignment.ScopeId, ct);
+        var callerId = user.GetUserId();
+        if (scope is null || !await permissions.HasPermissionAsync(callerId, Permission.RoleAssignmentWrite, scope, ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        if (assignment.RevokedAt is null)
+        {
+            assignment.RevokedAt = DateTimeOffset.UtcNow;
+            db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "ACCESS_REVOKED", "role_assignment", assignment.Id, NewRequestId()));
+            await db.SaveChangesAsync(ct);
+        }
+
+        return ToRoleAssignmentObject(assignment);
+    }
+
+    [McpServerTool(Name = "admin.agent.register")]
+    [Description("Onboards a new agent in one call: creates its ServiceAccount identity, issues its fv_sa_... token (shown once, store it immediately), and grants it a role at a scope. Callable only by an identity holding RoleAssignmentWrite (Owner/Admin) at that scope — an agent can never register itself. Once registered, the agent uses its own token to call admin.secret.create/credential.request for the credentials it already holds.")]
+    public static async Task<object> AdminAgentRegisterAsync(
+        [Description("Agent name — becomes the ServiceAccount name, must be unique")] string name,
+        [Description("Scope type to grant access at: Organization, Project, or Environment")] string scopeType,
+        [Description("Id of the Organization/Project/Environment matching scopeType")] Guid scopeId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct,
+        [Description("Role to grant the agent — defaults to Agent")] string role = "Agent")
+    {
+        var (parsedRole, parsedScopeType) = ParseRoleAndScopeTypeOrThrow(role, scopeType);
+
+        var scope = await RoleAssignmentScopeResolver.ResolveAsync(db, parsedScopeType, scopeId, ct);
+        if (scope is null)
+        {
+            throw new McpException("scope_not_found");
+        }
+
+        var callerId = user.GetUserId();
+        var callerType = user.GetActorType();
+        if (!await permissions.HasPermissionAsync(callerId, Permission.RoleAssignmentWrite, scope, ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        if (await db.ServiceAccounts.AnyAsync(s => s.Name == name, ct))
+        {
+            throw new McpException("service_account_name_taken");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var account = new ServiceAccount { Id = Guid.NewGuid(), Name = name, IsActive = true, CreatedAt = now };
+        db.ServiceAccounts.Add(account);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, callerType, "SERVICE_ACCOUNT_CREATE", "service_account", account.Id, NewRequestId()));
+
+        var rawToken = ServiceAccountTokenFactory.GenerateRawToken();
+        var token = new ServiceAccountToken
+        {
+            Id = Guid.NewGuid(),
+            ServiceAccountId = account.Id,
+            TokenHash = ServiceAccountTokenFactory.Hash(rawToken),
+            TokenPrefix = ServiceAccountTokenFactory.ToDisplayPrefix(rawToken),
+            IssuedAt = now,
+        };
+        db.ServiceAccountTokens.Add(token);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, callerType, "TOKEN_ISSUED", "service_account", account.Id, NewRequestId()));
+
+        var assignment = new RoleAssignment
+        {
+            Id = Guid.NewGuid(),
+            IdentityId = account.Id,
+            Role = parsedRole,
+            ScopeType = parsedScopeType,
+            ScopeId = scopeId,
+            CreatedAt = now,
+        };
+        db.RoleAssignments.Add(assignment);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, callerType, "ACCESS_GRANTED", "role_assignment", assignment.Id, NewRequestId()));
+
+        await db.SaveChangesAsync(ct);
+
+        return new
+        {
+            serviceAccountId = account.Id,
+            name = account.Name,
+            token = rawToken,
+            tokenPrefix = token.TokenPrefix,
+            roleAssignmentId = assignment.Id,
+            role = parsedRole.ToString(),
+            scopeType = parsedScopeType.ToString(),
+            scopeId,
+        };
+    }
+
+    private static (Role Role, RoleScopeType ScopeType) ParseRoleAndScopeTypeOrThrow(string role, string scopeType)
+    {
+        if (!Enum.TryParse<Role>(role, ignoreCase: true, out var parsedRole))
+        {
+            throw new McpException("unknown_role");
+        }
+
+        if (!Enum.TryParse<RoleScopeType>(scopeType, ignoreCase: true, out var parsedScopeType))
+        {
+            throw new McpException("unknown_scope_type");
+        }
+
+        return (parsedRole, parsedScopeType);
+    }
+
+    private static object ToRoleAssignmentObject(RoleAssignment assignment) => new
+    {
+        id = assignment.Id,
+        identityId = assignment.IdentityId,
+        role = assignment.Role.ToString(),
+        scopeType = assignment.ScopeType.ToString(),
+        scopeId = assignment.ScopeId,
+        status = assignment.RevokedAt is null ? "active" : "revoked",
+        createdAt = assignment.CreatedAt,
+        revokedAt = assignment.RevokedAt,
+    };
 
     private static async Task<(Secret Secret, ResourceScope Scope)> ResolveOrThrowAsync(
         ForgeVaultDbContext db, Guid secretId, CancellationToken ct)

@@ -12,6 +12,9 @@ public enum Permission
 
     // M8 (docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md, admin.audit.search).
     AuditRead,
+
+    // M9 (docs/modules/04_AUTHORIZATION_AND_POLICY.md §7, assignRole/revokeRoleAssignment).
+    RoleAssignmentWrite,
 }
 
 // Whichever levels of the hierarchy are known for the resource being checked — a
