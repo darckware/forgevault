@@ -1,0 +1,14 @@
+# Dev-stage only (M0). A production multi-stage build is introduced in a later milestone
+# once the Api project has real dependencies worth optimizing image layers for.
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+WORKDIR /src
+
+COPY . .
+
+WORKDIR /src/src/ForgeVault.Api
+
+EXPOSE 8080
+ENV ASPNETCORE_URLS=http://+:8080
+
+ENTRYPOINT ["dotnet", "run", "--no-launch-profile"]

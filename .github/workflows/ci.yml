@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # ForgeVault.Api.IntegrationTests (docs/architecture/IMPLEMENTATION_READINESS.md, M1)
+    # round-trips real rows through Postgres — no mocking, per the milestone's own
+    # acceptance bar — so CI needs a real database, not just a build.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: forgevault
+          POSTGRES_PASSWORD: forgevault_dev_only
+          POSTGRES_DB: forgevault
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U forgevault -d forgevault"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      FORGEVAULT_TEST_CONNECTION: "Host=localhost;Port=5435;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
+      FORGEVAULT_CONNECTION: "Host=localhost;Port=5435;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
+      # docs/architecture/IMPLEMENTATION_READINESS.md, M4: the Api now resolves
+      # IKeyManagementProvider eagerly at startup (fail-fast), so ForgeVault.Api.IntegrationTests
+      # and ForgeVault.E2E.Tests (both boot the real Api via WebApplicationFactory) need a real
+      # Master Key file to exist. The generator's default path is /root/.forgevault/master.key,
+      # which the non-root `runner` user on GitHub-hosted runners can't write to — override both
+      # the generator and the app's own config to a path under the runner's home instead.
+      FORGEVAULT_MASTER_KEY_PATH: "${{ github.workspace }}/.forgevault/master.key"
+      MasterKey__KeyFilePath: "${{ github.workspace }}/.forgevault/master.key"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 10.0.*
+
+      - name: Generate master key
+        run: bash deploy/scripts/generate-master-key.sh
+
+      - name: Restore
+        run: dotnet restore ForgeVault.slnx
+
+      - name: Build
+        run: dotnet build ForgeVault.slnx --no-restore --configuration Release
+
+      - name: Apply migrations
+        run: >-
+          dotnet ef database update
+          --project src/ForgeVault.Infrastructure
+          --startup-project src/ForgeVault.Api
+          --configuration Release
+
+      - name: Test
+        run: dotnet test ForgeVault.slnx --no-build --configuration Release --verbosity normal

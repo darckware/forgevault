@@ -1,0 +1,32 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+
+# Rider / VS
+.vs/
+.idea/
+*.DotSettings.user
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# Node / Web (ForgeVault.Web, when it exists)
+node_modules/
+dist/
+.vite/
+
+# Secrets — never committed
+.env
+.env.*
+!.env.example
+*.key
+/root/.forgevault/
+
+# OS
+.DS_Store
+Thumbs.db

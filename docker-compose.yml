@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: forgevault
+      POSTGRES_PASSWORD: forgevault_dev_only
+      POSTGRES_DB: forgevault
+    # host port 5435: this host already runs sibling-project Postgres instances on
+    # 5432 (hindsight), 5433 (forgehub), 5434 (forgerouter), 5436 (darckware) — 5435 is
+    # the next free slot. Only the host-side mapping matters; other services in this
+    # compose file reach Postgres via the internal Docker network as "postgres:5432".
+    ports:
+      - "5435:5432"
+    volumes:
+      - forgevault_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forgevault -d forgevault"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__ForgeVault: "Host=postgres;Port=5432;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
+      ConnectionStrings__Redis: "redis:6379"
+
+  # web:
+  # ForgeVault.Web (React + TypeScript + Vite) is intentionally not scaffolded yet —
+  # per docs/architecture/IMPLEMENTATION_READINESS.md, active frontend work starts
+  # after the Secrets/Auth API surface (M4/M5) exists to consume. Add the service here
+  # once src/ForgeVault.Web is created.
+
+volumes:
+  forgevault_postgres_data:

@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ForgeVault.Api/ForgeVault.Api.csproj" />
+    <Project Path="src/ForgeVault.Application/ForgeVault.Application.csproj" />
+    <Project Path="src/ForgeVault.Domain/ForgeVault.Domain.csproj" />
+    <Project Path="src/ForgeVault.Infrastructure/ForgeVault.Infrastructure.csproj" />
+    <Project Path="src/ForgeVault.Worker/ForgeVault.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/E2E/">
+    <Project Path="tests/E2E/ForgeVault.E2E.Tests/ForgeVault.E2E.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Integration/">
+    <Project Path="tests/Integration/ForgeVault.Api.IntegrationTests/ForgeVault.Api.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Security/">
+    <Project Path="tests/Security/ForgeVault.Security.Tests/ForgeVault.Security.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Unit/">
+    <Project Path="tests/Unit/ForgeVault.Application.Tests/ForgeVault.Application.Tests.csproj" />
+    <Project Path="tests/Unit/ForgeVault.Domain.Tests/ForgeVault.Domain.Tests.csproj" />
+    <Project Path="tests/Unit/ForgeVault.Infrastructure.Tests/ForgeVault.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>
