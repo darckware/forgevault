@@ -19,6 +19,11 @@ obj/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+# `tsc -b` compiles vite.config.ts as a side effect of the composite tsconfig.node.json
+# project reference — these are build output, not source.
+/src/ForgeVault.Web/vite.config.js
+/src/ForgeVault.Web/vite.config.d.ts
 
 # Secrets — never committed
 .env
