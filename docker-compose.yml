@@ -62,20 +62,18 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - api
-    # Bound to 127.0.0.1 and this host's Tailscale IP only — never 0.0.0.0 — same pattern
-    # already used by the sibling darckware-frontend/darckware-backend containers on this
-    # host. The Tailscale binding replaces the public Cloudflare tunnel route to this port
-    # (docker-compose.yml history: that route was flagged as an unintended exposure of a
-    # secrets manager); the tunnel route itself must still be removed in the Cloudflare
-    # dashboard separately, this only stops relying on it. 100.105.235.114 is this host's
-    # Tailscale IP (`tailscale ip -4`) — update it if this node is ever re-registered. `api`
-    # (port 8080, above) does NOT need the same binding: the browser reaches it same-origin
-    # through this container's own nginx /api/ proxy, never directly. Port 4200 chosen
-    # because 3000 (darckware), 2100 (forgerouter), and 4173 (forgehub) are already in use by
-    # sibling projects on this host.
+    # Bound to 127.0.0.1 only (never 0.0.0.0) — same "localhost only" requirement as `api`
+    # above. Reachable off-host over the tailnet via the "forgevault" Tailscale Service
+    # (`tailscale service list`), which proxies https://forgevault.<tailnet>.ts.net to this
+    # 127.0.0.1:4200 — that replaced an earlier direct bind of this port to the host's
+    # Tailscale IP (redundant once the Service existed) and, before that, a public Cloudflare
+    # tunnel route to this port that was flagged as an unintended exposure of a secrets
+    # manager (that tunnel route itself was removed outside this repo, in the Cloudflare
+    # dashboard). The Tailscale Service config lives on the host/tailnet, not in this repo.
+    # Port 4200 chosen because 3000 (darckware), 2100 (forgerouter), and 4173 (forgehub) are
+    # already in use by sibling projects on this host.
     ports:
       - "127.0.0.1:4200:80"
-      - "100.105.235.114:4200:80"
 
 volumes:
   forgevault_postgres_data:
