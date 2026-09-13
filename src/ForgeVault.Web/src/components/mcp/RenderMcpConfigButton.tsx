@@ -33,21 +33,29 @@ export function RenderMcpConfigButton({ assignmentId }: { assignmentId: string }
   useEffect(() => clearTimer, []);
 
   const handleConfirm = async () => {
-    setConfirmOpen(false);
-    const config = await render.mutateAsync();
-    setRenderedJson(JSON.stringify(config, null, 2));
-    setSecondsLeft(REVEAL_SECONDS);
+    // Keep the confirmation modal open until the mutation settles — closing it first (as this
+    // used to) discards the only surface that renders render.isError, so a failure (e.g. a
+    // revoked assignment) left the admin with no feedback at all, just a button that stopped
+    // loading.
+    try {
+      const config = await render.mutateAsync();
+      setConfirmOpen(false);
+      setRenderedJson(JSON.stringify(config, null, 2));
+      setSecondsLeft(REVEAL_SECONDS);
 
-    clearTimer();
-    timerRef.current = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          hide();
-          return REVEAL_SECONDS;
-        }
-        return s - 1;
-      });
-    }, 1000);
+      clearTimer();
+      timerRef.current = setInterval(() => {
+        setSecondsLeft((s) => {
+          if (s <= 1) {
+            hide();
+            return REVEAL_SECONDS;
+          }
+          return s - 1;
+        });
+      }, 1000);
+    } catch {
+      // render.isError / render.error already reflect this — the modal stays open to show it.
+    }
   };
 
   return (

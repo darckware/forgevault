@@ -57,7 +57,13 @@ export function McpAssignmentsPage() {
           className="mb-4 flex items-end gap-2"
         >
           <div className="flex-1">
-            <Input label="Identity id" value={lookupId} onChange={(e) => setLookupId(e.target.value)} placeholder="paste a GUID" />
+            <Input
+              id="mcp-assignment-lookup-identity-id"
+              label="Identity id"
+              value={lookupId}
+              onChange={(e) => setLookupId(e.target.value)}
+              placeholder="paste a GUID"
+            />
           </div>
           <Button type="submit">Load</Button>
         </form>
