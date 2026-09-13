@@ -726,6 +726,13 @@ public sealed class VaultTools
             throw new McpException("identity_has_no_role_assignment");
         }
 
+        using var paramValuesDoc = System.Text.Json.JsonDocument.Parse(paramValuesJson);
+        var missingSecretParam = McpAssignmentValidation.FindMissingOrInvalidSecretParam(definition, paramValuesDoc.RootElement);
+        if (missingSecretParam is not null)
+        {
+            throw new McpException($"missing_required_secret_param:{missingSecretParam}");
+        }
+
         var grantAuditMetadata = System.Text.Json.JsonSerializer.Serialize(new
         {
             grantedViaRoleAssignments = activeRoles.Select(r => new { r.Id, role = r.Role.ToString(), scopeType = r.ScopeType.ToString(), r.ScopeId }),

@@ -144,6 +144,12 @@ public static class McpRegistryEndpoints
                 return Results.Conflict(new ErrorResponse("identity_has_no_role_assignment"));
             }
 
+            var missingSecretParam = McpAssignmentValidation.FindMissingOrInvalidSecretParam(definition, request.ParamValues);
+            if (missingSecretParam is not null)
+            {
+                return Results.Conflict(new ErrorResponse($"missing_required_secret_param:{missingSecretParam}"));
+            }
+
             var grantAuditMetadata = JsonSerializer.Serialize(new
             {
                 grantedViaRoleAssignments = activeRoles.Select(r => new { r.Id, role = r.Role.ToString(), scopeType = r.ScopeType.ToString(), r.ScopeId }),
