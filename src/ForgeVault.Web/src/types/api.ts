@@ -60,11 +60,20 @@ export interface LoginResponse {
 export interface MeResponse {
   id: string;
   email: string;
+  mfaEnabled: boolean;
 }
 
 export interface MfaEnrollResponse {
   base32Secret: string;
   otpAuthUri: string;
+}
+
+export interface MfaVerifyResponse {
+  enabled: boolean;
+}
+
+export interface ChangePasswordResponse {
+  changed: boolean;
 }
 
 // --- Organizations ---

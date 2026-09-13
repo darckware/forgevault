@@ -34,7 +34,23 @@ public static class AuthEndpoints
         {
             var id = user.FindFirstValue(JwtRegisteredClaimNames.Sub);
             var email = user.FindFirstValue(JwtRegisteredClaimNames.Email);
-            return Results.Ok(new MeResponse(id!, email!));
+            // mfa_enabled is already on the access token (AuthService.CreateAccessToken) —
+            // reading it from the claim avoids a DB round-trip for what's just profile display.
+            var mfaEnabled = user.FindFirstValue("mfa_enabled") == "true";
+            return Results.Ok(new MeResponse(id!, email!, mfaEnabled));
+        }).RequireAuthorization();
+
+        group.MapPost("/change-password", async (ChangePasswordRequest request, IAuthService authService, ClaimsPrincipal user, CancellationToken ct) =>
+        {
+            if (request.NewPassword.Length < 8)
+            {
+                return Results.Json(new ErrorResponse("password_too_short"), statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var changed = await authService.ChangePasswordAsync(user.GetUserId(), request.CurrentPassword, request.NewPassword, ct);
+            return changed
+                ? Results.Ok(new ChangePasswordResponse(true))
+                : Results.Json(new ErrorResponse("invalid_credentials"), statusCode: StatusCodes.Status401Unauthorized);
         }).RequireAuthorization();
 
         // docs/modules/02_IDENTITY_AND_AUTHENTICATION.md §5 UC-05 (M6). Enrolling alone does
@@ -70,12 +86,16 @@ public sealed record RefreshRequest(string RefreshToken);
 
 public sealed record MfaVerifyRequest(string Code);
 
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
 public sealed record LoginResponse(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt);
 
 public sealed record ErrorResponse(string Error);
 
-public sealed record MeResponse(string Id, string Email);
+public sealed record MeResponse(string Id, string Email, bool MfaEnabled);
 
 public sealed record MfaEnrollResponse(string Base32Secret, string OtpAuthUri);
 
 public sealed record MfaVerifyResponse(bool Enabled);
+
+public sealed record ChangePasswordResponse(bool Changed);

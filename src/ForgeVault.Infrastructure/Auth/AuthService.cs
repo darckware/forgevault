@@ -146,6 +146,29 @@ public sealed class AuthService(
         return true;
     }
 
+    public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct)
+    {
+        var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
+        if (!passwordHasher.Verify(currentPassword, user.PasswordHash))
+        {
+            logger.LogInformation("Change password rejected: current password did not match.");
+            return false;
+        }
+
+        user.PasswordHash = passwordHasher.Hash(newPassword);
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Every other session (every other refresh token family) dies with the old
+        // password — the caller's own current access token still works until it expires
+        // (max 15 min), same as any other refresh-token revocation in this file.
+        await db.RefreshTokens
+            .Where(t => t.UserId == userId && t.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(t => t.RevokedAt, DateTimeOffset.UtcNow), ct);
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     private async Task<AuthOutcome> IssueTokensAsync(User user, Guid familyId, bool mfaVerified, CancellationToken ct)
     {
         var options = jwtOptions.Value;

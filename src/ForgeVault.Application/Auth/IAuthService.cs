@@ -19,6 +19,13 @@ public interface IAuthService
     // MfaEnabled to true. Returns false (not an exception) on an invalid code — an
     // expected, non-exceptional outcome, same pattern as AuthOutcome for login.
     Task<bool> VerifyMfaAsync(Guid userId, string code, CancellationToken ct);
+
+    // Returns false (not an exception) when currentPassword doesn't match — same
+    // non-exceptional-failure pattern as VerifyMfaAsync. On success, every other active
+    // refresh token for this user is revoked (docs/ForgeVault.md §53 spirit: a password
+    // change is exactly the moment every other session should be forced to re-authenticate,
+    // same as the reuse-detection path already does for a single compromised family).
+    Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct);
 }
 
 public abstract record AuthOutcome;

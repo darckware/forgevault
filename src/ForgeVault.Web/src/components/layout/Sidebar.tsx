@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { Activity, Building2, KeyRound, Link2, Plug, ScrollText, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { UserMenu } from "@/components/layout/UserMenu";
 
 const NAV_ITEMS = [
   { to: "/overview", label: "Overview", icon: Activity },
@@ -14,12 +15,12 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-vault-surface-border bg-vault-bg-deep">
+    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-vault-surface-border bg-vault-bg-deep">
       <div className="flex items-center gap-2 px-4 py-5">
         <img src="/forgevault-icon.svg" alt="ForgeVault" className="h-7 w-7" />
         <span className="text-sm font-semibold tracking-wide text-slate-100">ForgeVault</span>
       </div>
-      <nav className="flex flex-col gap-1 px-2">
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-2">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -38,6 +39,7 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      <UserMenu />
     </aside>
   );
 }

@@ -1,7 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
-import type { LoginResponse, MeResponse } from "@/types/api";
+import type {
+  ChangePasswordResponse,
+  LoginResponse,
+  MeResponse,
+  MfaEnrollResponse,
+  MfaVerifyResponse,
+} from "@/types/api";
 
 export interface LoginPayload {
   email: string;
@@ -44,4 +50,33 @@ export function useLogout() {
     clear();
     window.location.assign("/login");
   };
+}
+
+export function useMfaEnroll() {
+  return useMutation({
+    mutationFn: () => apiFetch<MfaEnrollResponse>("/api/v1/auth/mfa/enroll", { method: "POST" }),
+  });
+}
+
+export function useMfaVerify() {
+  const setUser = useAuthStore((s) => s.setUser);
+  const user = useAuthStore((s) => s.user);
+  return useMutation({
+    mutationFn: (code: string) => apiFetch<MfaVerifyResponse>("/api/v1/auth/mfa/verify", { method: "POST", body: JSON.stringify({ code }) }),
+    onSuccess: () => {
+      // The access token isn't reissued here, so mfaEnabled on it stays stale until the
+      // next login/refresh — flip the cached profile locally so the account screen reflects
+      // "MFA enabled" immediately instead of waiting for that.
+      if (user) {
+        setUser({ ...user, mfaEnabled: true });
+      }
+    },
+  });
+}
+
+export function useChangeMyPassword() {
+  return useMutation({
+    mutationFn: (payload: { currentPassword: string; newPassword: string }) =>
+      apiFetch<ChangePasswordResponse>("/api/v1/auth/change-password", { method: "POST", body: JSON.stringify(payload) }),
+  });
 }
