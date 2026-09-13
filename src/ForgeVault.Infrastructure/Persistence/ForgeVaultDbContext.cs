@@ -19,6 +19,8 @@ public sealed class ForgeVaultDbContext(DbContextOptions<ForgeVaultDbContext> op
     public DbSet<RoleAssignment> RoleAssignments => Set<RoleAssignment>();
     public DbSet<ServiceAccount> ServiceAccounts => Set<ServiceAccount>();
     public DbSet<ServiceAccountToken> ServiceAccountTokens => Set<ServiceAccountToken>();
+    public DbSet<McpServerDefinition> McpServerDefinitions => Set<McpServerDefinition>();
+    public DbSet<McpServerAssignment> McpServerAssignments => Set<McpServerAssignment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

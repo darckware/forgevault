@@ -632,6 +632,197 @@ public sealed class VaultTools
         revokedAt = assignment.RevokedAt,
     };
 
+    [McpServerTool(Name = "admin.mcp.register")]
+    [Description("Registers a new MCP server definition in the catalog (e.g. a stdio server like 'forgehub-messages' or an HTTP one like 'forgevault' itself) under an Organization. RBAC gated by McpRegistryWrite (Owner/Admin).")]
+    public static async Task<object> AdminMcpRegisterAsync(
+        [Description("Organization this definition belongs to")] Guid organizationId,
+        [Description("Unique name within the organization, e.g. 'forgehub-messages'")] string name,
+        [Description("Transport: Stdio or Http")] string transport,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct,
+        [Description("Stdio only: the executable, e.g. 'uv'")] string? command = null,
+        [Description("Stdio only: JSON array of args, e.g. [\"run\", \"/path/script.py\"]")] string? argsJson = null,
+        [Description("Http only: the MCP endpoint URL")] string? url = null,
+        int? timeout = null,
+        int? connectTimeout = null,
+        [Description("JSON dict of non-sensitive static env/config, e.g. {\"FORGEHUB_API_URL\":\"http://localhost:8000\"}")] string? staticEnvJson = null,
+        [Description("JSON array of parameter names each assignment must supply as a Secret reference, e.g. [\"FORGEHUB_AGENT_TOKEN\"]")] string? secretParamNamesJson = null)
+    {
+        if (!Enum.TryParse<McpTransportType>(transport, ignoreCase: true, out var parsedTransport))
+        {
+            throw new McpException("unknown_transport");
+        }
+
+        if (!await db.Organizations.AnyAsync(o => o.Id == organizationId, ct))
+        {
+            throw new McpException("organization_not_found");
+        }
+
+        var callerId = user.GetUserId();
+        if (!await permissions.HasPermissionAsync(callerId, Permission.McpRegistryWrite, new ResourceScope(organizationId, null, null), ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        if (await db.McpServerDefinitions.AnyAsync(m => m.OrganizationId == organizationId && m.Name == name, ct))
+        {
+            throw new McpException("mcp_server_name_taken");
+        }
+
+        var definition = new McpServerDefinition
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            Name = name,
+            Transport = parsedTransport,
+            Command = command,
+            ArgsJson = argsJson,
+            Url = url,
+            Timeout = timeout,
+            ConnectTimeout = connectTimeout,
+            StaticEnvJson = staticEnvJson,
+            SecretParamNamesJson = secretParamNamesJson,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        db.McpServerDefinitions.Add(definition);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "MCP_SERVER_REGISTERED", "mcp_server_definition", definition.Id, NewRequestId()));
+        await db.SaveChangesAsync(ct);
+
+        return new { id = definition.Id, organizationId, name, transport = parsedTransport.ToString() };
+    }
+
+    [McpServerTool(Name = "admin.mcp.assign")]
+    [Description("Grants an identity access to a registered MCP server, binding it to that identity's real RBAC authorization (rejected if the identity holds no active RoleAssignment anywhere). paramValuesJson is a JSON dict where each value is either a literal string or {\"secretId\":\"<guid>\"} referencing an existing Secret. RBAC gated by McpRegistryWrite. Idempotent per (identity, definition).")]
+    public static async Task<object> AdminMcpAssignAsync(
+        Guid identityId,
+        Guid mcpServerDefinitionId,
+        [Description("JSON dict: literal strings for non-sensitive values, {\"secretId\":\"...\"} for values that must come from an existing Secret")] string paramValuesJson,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var definition = await db.McpServerDefinitions.FindAsync([mcpServerDefinitionId], ct);
+        if (definition is null)
+        {
+            throw new McpException("mcp_server_not_found");
+        }
+
+        var callerId = user.GetUserId();
+        if (!await permissions.HasPermissionAsync(callerId, Permission.McpRegistryWrite, new ResourceScope(definition.OrganizationId, null, null), ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        var activeRoles = await db.RoleAssignments
+            .Where(r => r.IdentityId == identityId && r.RevokedAt == null)
+            .Select(r => new { r.Id, r.Role, r.ScopeType, r.ScopeId })
+            .ToListAsync(ct);
+        if (activeRoles.Count == 0)
+        {
+            throw new McpException("identity_has_no_role_assignment");
+        }
+
+        var grantAuditMetadata = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            grantedViaRoleAssignments = activeRoles.Select(r => new { r.Id, role = r.Role.ToString(), scopeType = r.ScopeType.ToString(), r.ScopeId }),
+        });
+
+        var existing = await db.McpServerAssignments.SingleOrDefaultAsync(a =>
+            a.IdentityId == identityId && a.McpServerDefinitionId == mcpServerDefinitionId && a.RevokedAt == null, ct);
+        if (existing is not null)
+        {
+            existing.ParamValuesJson = paramValuesJson;
+            db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "MCP_SERVER_ACCESS_RELEASED", "mcp_server_assignment", existing.Id, NewRequestId(), grantAuditMetadata));
+            await db.SaveChangesAsync(ct);
+            return ToMcpAssignmentObject(existing);
+        }
+
+        var assignment = new McpServerAssignment
+        {
+            Id = Guid.NewGuid(),
+            IdentityId = identityId,
+            McpServerDefinitionId = mcpServerDefinitionId,
+            ParamValuesJson = paramValuesJson,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        db.McpServerAssignments.Add(assignment);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "MCP_SERVER_ACCESS_RELEASED", "mcp_server_assignment", assignment.Id, NewRequestId(), grantAuditMetadata));
+        await db.SaveChangesAsync(ct);
+
+        return ToMcpAssignmentObject(assignment);
+    }
+
+    [McpServerTool(Name = "admin.mcp.revoke_assignment")]
+    [Description("Revokes an identity's access to an MCP server. Idempotent.")]
+    public static async Task<object> AdminMcpRevokeAssignmentAsync(
+        Guid mcpAssignmentId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var assignment = await db.McpServerAssignments.FindAsync([mcpAssignmentId], ct);
+        if (assignment is null)
+        {
+            throw new McpException("mcp_assignment_not_found");
+        }
+
+        var definition = await db.McpServerDefinitions.FindAsync([assignment.McpServerDefinitionId], ct);
+        var callerId = user.GetUserId();
+        if (definition is null || !await permissions.HasPermissionAsync(callerId, Permission.McpRegistryWrite, new ResourceScope(definition.OrganizationId, null, null), ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        if (assignment.RevokedAt is null)
+        {
+            assignment.RevokedAt = DateTimeOffset.UtcNow;
+            db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "MCP_SERVER_ASSIGNMENT_REVOKED", "mcp_server_assignment", assignment.Id, NewRequestId()));
+            await db.SaveChangesAsync(ct);
+        }
+
+        return ToMcpAssignmentObject(assignment);
+    }
+
+    [McpServerTool(Name = "mcp.render_config")]
+    [Description("Resolves an MCP server assignment into the ready-to-use config block (with any referenced Secret decrypted) — what deploy/scripts/sync_mcp_config.py writes into an agent's mcp_servers: YAML. Callable by the assignment's own identity for itself, or by anyone holding SecretReadValue on every referenced secret.")]
+    public static async Task<object> McpRenderConfigAsync(
+        Guid mcpAssignmentId,
+        ForgeVaultDbContext db,
+        IEnvelopeEncryptionService crypto,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var result = await McpAssignmentRenderer.RenderAsync(
+            db, crypto, permissions, mcpAssignmentId, user.GetUserId(), user.GetActorType(), NewRequestId(), ct);
+
+        return result.Outcome switch
+        {
+            McpRenderOutcome.Success => result.Response!,
+            McpRenderOutcome.Forbidden => throw new McpException("forbidden"),
+            McpRenderOutcome.AssignmentRevoked => throw new McpException("assignment_revoked"),
+            McpRenderOutcome.ReferencedSecretNotFound => throw new McpException($"referenced_secret_not_found:{result.Detail}"),
+            McpRenderOutcome.AssignmentNotFound => throw new McpException("mcp_assignment_not_found"),
+            _ => throw new McpException("mcp_server_not_found"),
+        };
+    }
+
+    private static object ToMcpAssignmentObject(McpServerAssignment assignment) => new
+    {
+        id = assignment.Id,
+        identityId = assignment.IdentityId,
+        mcpServerDefinitionId = assignment.McpServerDefinitionId,
+        status = assignment.RevokedAt is null ? "active" : "revoked",
+        createdAt = assignment.CreatedAt,
+        revokedAt = assignment.RevokedAt,
+    };
+
     private static async Task<(Secret Secret, ResourceScope Scope)> ResolveOrThrowAsync(
         ForgeVaultDbContext db, Guid secretId, CancellationToken ct)
     {

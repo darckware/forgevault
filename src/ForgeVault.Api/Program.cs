@@ -150,6 +150,7 @@ app.MapSecretEndpoints();
 app.MapServiceAccountEndpoints();
 app.MapAuditEndpoints();
 app.MapRoleAssignmentEndpoints();
+app.MapMcpRegistryEndpoints();
 
 app.MapMcp("/mcp").RequireAuthorization();
 

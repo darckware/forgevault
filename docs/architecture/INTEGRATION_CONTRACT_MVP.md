@@ -1,6 +1,6 @@
-# ForgeVault — Contrato de Integração (MVP M7 + MCP M8 + Gestão de Acesso M9)
+# ForgeVault — Contrato de Integração (MVP M7 + MCP M8 + Gestão de Acesso M9 + Registro MCP M10)
 
-> **Status documental:** descreve os mecanismos de integração realmente implementados — REST (Onda 1/M7), MCP nativo (M8, onda 1 de tools) e gestão de `RoleAssignment`/onboarding de agente via API/MCP (M9). A visão completa (tools `access.*`/`session.*`/`approval.status`/`admin.policy.*`, propagação de contexto operacional para autorização) continua em `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` — Fase 2/3, ainda não implementada. Este documento é o contrato **já funcional** que ForgeHub/ForgeRouter podem usar hoje, por qualquer uma das vias.
+> **Status documental:** descreve os mecanismos de integração realmente implementados — REST (Onda 1/M7), MCP nativo (M8, onda 1 de tools), gestão de `RoleAssignment`/onboarding de agente via API/MCP (M9) e o catálogo de servidores MCP + assignment por identidade (M10). A visão completa (tools `access.*`/`session.*`/`approval.status`/`admin.policy.*`, propagação de contexto operacional para autorização) continua em `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` — Fase 2/3, ainda não implementada. Este documento é o contrato **já funcional** que ForgeHub/ForgeRouter podem usar hoje, por qualquer uma das vias.
 
 ## 1. Identidade
 
@@ -98,7 +98,20 @@ Accept: application/json, text/event-stream
 }}
 ```
 
-Tools disponíveis hoje: `secret.metadata`, `credential.request` (só `REVEAL`), `capability.check`, `admin.secret.create/update/rotate/revoke`, `admin.audit.search`, `admin.role.grant/revoke` e `admin.agent.register` (M9) — ver `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` §7 para a lista completa incluindo o que ainda não existe. Erros de negócio/autorização chegam como `CallToolResult` com `isError: true` e a mensagem em `content[0].text` (lançar `McpException` dentro da tool, não deixar vazar outra exceção).
+Tools disponíveis hoje: `secret.metadata`, `credential.request` (só `REVEAL`), `capability.check`, `admin.secret.create/update/rotate/revoke`, `admin.audit.search`, `admin.role.grant/revoke`, `admin.agent.register` (M9) e `admin.mcp.register/assign/revoke_assignment` + `mcp.render_config` (M10) — ver `docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` §7 para a lista completa incluindo o que ainda não existe. Erros de negócio/autorização chegam como `CallToolResult` com `isError: true` e a mensagem em `content[0].text` (lançar `McpException` dentro da tool, não deixar vazar outra exceção).
+
+### Catálogo de servidores MCP e assignment por identidade (M10)
+
+Um Owner/Admin cadastra um servidor MCP no catálogo da Organization e concede acesso a uma identidade — via REST (`docs/modules/11_MCP_REGISTRY.md` §7) ou via MCP:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+  "name":"admin.mcp.assign",
+  "arguments":{"identityId":"<guid>","mcpServerDefinitionId":"<guid>","paramValuesJson":"{\"FORGEHUB_AGENT_TOKEN\":{\"secretId\":\"<guid>\"}}"}
+}}
+```
+
+A identidade atribuída (ou qualquer ator com `SecretReadValue` em todo secret referenciado) resolve a config pronta para uso — com o secret já decriptado — via `mcp.render_config` ou `GET /api/v1/mcp-assignments/{id}/render`. Este módulo **não** escreve em nenhum `config.yaml` de host de agente — apenas devolve o bloco resolvido; aplicá-lo a um host real é um passo externo a este repositório, ainda não automatizado (ver `docs/modules/11_MCP_REGISTRY.md` §1, `open_blocking_questions`). Ver `docs/modules/11_MCP_REGISTRY.md` para o contrato completo, incluindo um gap de segurança conhecido: nem o render REST nem `mcp.render_config` checam `RevokedAt` antes de resolver (§12).
 
 ### Onboarding de agente em uma chamada (M9)
 
@@ -126,3 +139,4 @@ neste fluxo — não pode conceder papéis a si mesmo nem a ninguém.
 - Hierarquia entre roles ao conceder acesso — `RoleAssignmentWrite` (M9) não impede um Owner/Admin de conceder qualquer role, incluindo Owner, no escopo onde tem a permissão (ver `docs/modules/04_AUTHORIZATION_AND_POLICY.md` §1, decisão registrada).
 - `correlation_id` propagado ponta a ponta entre Hermes → ForgeHub → ForgeVault → terceiro (`docs/ForgeVault.md` §113) — o `AuditLog` já tem a coluna, mas nada a preenche ainda.
 - Métricas `mcp_calls_total`/`credential_requests_total` (módulo 09 §11) — não implementadas neste marco.
+- Aplicar automaticamente a config de MCP renderizada (M10) a um `config.yaml` de host de agente real — ver `docs/modules/11_MCP_REGISTRY.md`.

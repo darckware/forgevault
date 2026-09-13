@@ -15,6 +15,9 @@ public enum Permission
 
     // M9 (docs/modules/04_AUTHORIZATION_AND_POLICY.md §7, assignRole/revokeRoleAssignment).
     RoleAssignmentWrite,
+
+    // M10 (docs/modules/11_MCP_REGISTRY.md) — manage the MCP server catalog and assignments.
+    McpRegistryWrite,
 }
 
 // Whichever levels of the hierarchy are known for the resource being checked — a

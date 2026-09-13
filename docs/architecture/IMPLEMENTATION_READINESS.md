@@ -24,6 +24,7 @@
 | 8 | `08_CLI_SDK.md` | 5, 6 | CLI `fv` e SDKs consumindo a API estabilizada | Fase 2 |
 | 9 | `09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` | 2, 4, 5, 6 | Service Accounts reais; ForgeHub autentica; ForgeRouter recupera credencial; MCP Server nativo | Fase 2 |
 | 10 | `10_RESILIENCE_HA_OPERATIONS.md` | 6, 7 | backup/restore testado, observabilidade, HA, maintenance mode | Fase 3/4 |
+| 11 | `11_MCP_REGISTRY.md` | 2, 4, 6, 9 | catálogo de servidores MCP por Organization, assignment por identidade amarrado a RoleAssignment real, render (REST + MCP) resolvendo referências a Secret | Fase 2 |
 
 Uma fase pode criar migrations preparatórias para a seguinte, mas não deve implementar comportamento cuja spec/dependência ainda não esteja aprovada (convenção herdada do `docs/modules/README.md` do ForgeHub).
 
@@ -80,6 +81,24 @@ um Owner registra um agente, o agente usa **seu próprio token recém-emitido** 
 Owner — para cadastrar uma credencial que já tinha via `admin.secret.create`, e o agente
 tentando se auto-promover a `Owner` via `admin.role.grant` é negado).
 
+## 3.3. Marco de Engenharia da Onda 2 — M10 (catálogo de servidores MCP e assignment por identidade)
+
+Motivado pelo mesmo tipo de gap operacional do M9, mas para configuração de MCP em vez de RBAC: o `mcp_servers:` de cada agente (Hermes ou outro) era editado à mão em `config.yaml`, incluindo tokens em texto puro (ex.: `FORGEHUB_AGENT_TOKEN`).
+
+| Entrega | Detalhe |
+|---|---|
+| `McpServerDefinition`/`McpServerAssignment` (novas entidades) | catálogo de "quais servidores MCP existem e como conectar" por Organization, mais "qual identidade está autorizada a usar qual servidor, com quais parâmetros" — nunca o valor de um secret, só a referência (`{"secretId": "..."}`) |
+| `McpRegistryEndpoints.cs` (7 endpoints REST) + 4 tools MCP (`admin.mcp.register`, `admin.mcp.assign`, `admin.mcp.revoke_assignment`, `mcp.render_config`) | mesmo padrão do M8/M9: a tool MCP e o endpoint REST equivalente compartilham a mesma lógica (`McpAssignmentRenderer` para o render, especificamente) |
+| `Permission.McpRegistryWrite` | novo na matriz (`RolePermissions.cs`), concedido só a `Owner`/`Admin` — mesmo padrão de `RoleAssignmentWrite` (M9) |
+| Checagem de autorização real antes de conceder acesso a MCP | criar uma `McpServerAssignment` para uma identidade sem nenhum `RoleAssignment` ativo é rejeitado (`409 identity_has_no_role_assignment`) — evita uma assignment "funcional" para uma identidade sem nenhuma autorização RBAC por trás |
+| Gap de sequenciamento documental (registrado, não escondido) | este marco foi implementado **antes** de existir `docs/modules/11_MCP_REGISTRY.md` — contrariando a regra de `docs/README.md` de spec aprovada antes do código. A spec foi escrita retroativamente na mesma revisão que corrigiu este texto; ver `docs/modules/11_MCP_REGISTRY.md` §1 (decisões) e §15 (Definition Gate, com itens abertos) |
+| Gap de segurança conhecido, não corrigido neste marco | nem `GET /api/v1/mcp-assignments/{id}/render` nem a tool `mcp.render_config` checam `RevokedAt` antes de resolver — uma assignment revogada continua renderizável por quem já tinha o `assignmentId` e ainda satisfaz a checagem de autorização do render. Ver `docs/modules/11_MCP_REGISTRY.md` §12 |
+| Cobertura de teste | apenas a listagem das 4 tools novas em `tools/list` (`McpToolsTests.ToolsList_ReturnsAllPlannedTools`, corrigido nesta mesma revisão — a lista esperada não tinha sido atualizada quando as tools foram adicionadas). Nenhum teste dedicado de Security/Integration para os fluxos REST/MCP deste módulo existe ainda — ver `docs/modules/11_MCP_REGISTRY.md` §13 |
+
+UI (`McpServersPage`/`McpServerDetailPage`/`McpAssignmentsPage` em `src/ForgeVault.Web`, catálogo por Organization + gestão de assignment por identidade com render mascarado por padrão) adicionada em revisão subsequente do mesmo marco — ver `docs/modules/11_MCP_REGISTRY.md` rev2 §9.
+
+Este marco **não** inclui: aplicar a config renderizada a um host de agente real (o script `deploy/scripts/sync_mcp_config.py` citado nos comentários de código não existe neste repositório).
+
 ## 4. Decisões de Design Já Fixadas para a Onda 1
 
 - **Modelo de dados**: `Organization → Project → Environment → Secret → SecretVersion → AuditLog` (§11), não o modelo multi-tenant de §81/§107. Justificativa: o próprio roadmap (§63) coloca "multi-tenant avançado" na Fase 4; o modelo simples satisfaz literalmente todos os critérios de aceite do MVP; migrar para `Tenant/Workspace` depois é aditivo (inserir camada acima), enquanto o caminho inverso seria disruptivo. Nomenclatura de `secret_versions` segue a DDL de §83 (`ciphertext`, `encrypted_dek`, `nonce`, `auth_tag`, `algorithm`), não os nomes mais antigos de §11.
@@ -131,6 +150,7 @@ tentando se auto-promover a `Owner` via `admin.role.grant` é negado).
 | Anomaly detection, telemetria avançada, webhooks/notificações | Fase 3 (§121-123) | `06_AUDIT_AND_GOVERNANCE.md` (revisão futura) |
 | Multi-tenant (`Tenant`/`Workspace`) e Row-Level Security | Fase 4 (§81, §157) | `01_FOUNDATION_AND_TENANCY.md` (revisão futura) |
 | HA, Kubernetes, auditoria particionada, compliance reports | Fase 3/4 (§144-152, §158) | `10_RESILIENCE_HA_OPERATIONS.md` |
+| Aplicar a config de MCP renderizada a um host de agente real (`deploy/scripts/sync_mcp_config.py` citado em comentários de código, não implementado) | Fase 2 | `11_MCP_REGISTRY.md` (revisão futura) |
 
 ## 7. Módulo de UI / Design System
 

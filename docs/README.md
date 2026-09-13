@@ -26,7 +26,8 @@ docs/
 │   ├── 07_LIFECYCLE_ROTATION_REVOCATION.md
 │   ├── 08_CLI_SDK.md
 │   ├── 09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md
-│   └── 10_RESILIENCE_HA_OPERATIONS.md
+│   ├── 10_RESILIENCE_HA_OPERATIONS.md
+│   └── 11_MCP_REGISTRY.md
 ├── reference/                     ← estado ATUALMENTE implementado (vazio até o 1º módulo virar código)
 │   └── README.md
 ├── templates/                     ← template canônico de module spec
@@ -62,7 +63,7 @@ Regra: documento de direção pode exigir uma mudança, mas não prova que ela j
 | `architecture/TARGET_ARCHITECTURE.md` | arquitetura-alvo consolidada | canônico para direção |
 | `architecture/IMPLEMENTATION_READINESS.md` | ordem de implementação, marcos de engenharia, fronteira da Onda 1 | canônico para planejamento técnico |
 | `architecture/INTEGRATION_CONTRACT_MVP.md` | contrato de integração REST realmente implementado (M7) para ForgeHub/ForgeRouter | estado atual da integração — não confundir com a visão MCP completa do módulo 09 |
-| `modules/README.md` e `modules/01_...` a `10_...` | contratos implementáveis por fatia | specs-alvo; nascem `status: draft`, exigem aprovação antes do código |
+| `modules/README.md` e `modules/01_...` a `11_...` | contratos implementáveis por fatia | specs-alvo; nascem `status: draft`, exigem aprovação antes do código |
 | `reference/*` | dicionário do estado implementado | ainda não existe (ver `reference/README.md`) |
 | `templates/MODULE_SPEC_TEMPLATE.md` | contrato mínimo antes da implementação de um módulo | template canônico |
 

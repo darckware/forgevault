@@ -18,6 +18,7 @@ Ordem de leitura e implementação (detalhamento de dependências e marcos em `d
 | 8 | `08_CLI_SDK.md` | 5, 6 | CLI `fv` e SDKs consumindo a API estável | Fase 2 |
 | 9 | `09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md` | 2, 4, 5, 6 | ForgeHub autentica, ForgeRouter recupera credencial, MCP nativo | Fase 2 |
 | 10 | `10_RESILIENCE_HA_OPERATIONS.md` | 6, 7 | backup/restore testado, observabilidade, HA | Fase 3/4 |
+| 11 | `11_MCP_REGISTRY.md` | 2, 4, 6, 9 | catálogo de servidores MCP + assignment por identidade + render de config resolvida (documentação retroativa — código já implementado no M10, ver `IMPLEMENTATION_READINESS.md` §3.3) | Fase 2 |
 
 Uma fase pode criar migrations preparatórias para a seguinte, mas não deve implementar comportamento cuja spec/dependência ainda não esteja aprovada.
 

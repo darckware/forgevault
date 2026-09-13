@@ -29,9 +29,10 @@ public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : ICla
         Assert.Equal(
             new[]
             {
-                "admin.agent.register", "admin.audit.search", "admin.role.grant", "admin.role.revoke",
+                "admin.agent.register", "admin.audit.search", "admin.mcp.assign", "admin.mcp.register",
+                "admin.mcp.revoke_assignment", "admin.role.grant", "admin.role.revoke",
                 "admin.secret.create", "admin.secret.revoke", "admin.secret.rotate", "admin.secret.update",
-                "capability.check", "credential.request", "secret.metadata",
+                "capability.check", "credential.request", "mcp.render_config", "secret.metadata",
             },
             names.OrderBy(n => n, StringComparer.Ordinal));
     }
