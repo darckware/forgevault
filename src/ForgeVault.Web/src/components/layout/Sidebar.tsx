@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, Building2, KeyRound, ScrollText, ShieldCheck } from "lucide-react";
+import { Activity, Building2, KeyRound, Link2, Plug, ScrollText, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const NAV_ITEMS = [
@@ -7,6 +7,8 @@ const NAV_ITEMS = [
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/service-accounts", label: "Service Accounts", icon: KeyRound },
   { to: "/access", label: "Access & Roles", icon: ShieldCheck },
+  { to: "/mcp-servers", label: "MCP Servers", icon: Plug },
+  { to: "/mcp-assignments", label: "MCP Assignments", icon: Link2 },
   { to: "/audit", label: "Audit", icon: ScrollText },
 ];
 

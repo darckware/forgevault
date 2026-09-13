@@ -180,3 +180,48 @@ export interface RoleAssignmentResponse {
   createdAt: string;
   revokedAt: string | null;
 }
+
+// --- MCP Registry (M10) ---
+export const MCP_TRANSPORT_TYPES = ["Stdio", "Http"] as const;
+export type McpTransportType = (typeof MCP_TRANSPORT_TYPES)[number];
+
+// A param value is either a plain non-sensitive string, or a reference to an existing Secret
+// resolved (decrypted) only at render time — never a value stored/duplicated here.
+export type McpParamValue = string | { secretId: string };
+
+export interface McpServerDefinitionResponse {
+  id: string;
+  organizationId: string;
+  name: string;
+  transport: McpTransportType;
+  command: string | null;
+  args: string[] | null;
+  url: string | null;
+  timeout: number | null;
+  connectTimeout: number | null;
+  staticEnv: Record<string, string> | null;
+  secretParamNames: string[] | null;
+  createdAt: string;
+}
+
+export interface McpServerAssignmentResponse {
+  id: string;
+  identityId: string;
+  mcpServerDefinitionId: string;
+  status: "active" | "revoked";
+  paramValues: Record<string, McpParamValue>;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface McpServerRenderResponse {
+  name: string;
+  transport: McpTransportType;
+  command: string | null;
+  args: string[] | null;
+  url: string | null;
+  timeout: number | null;
+  connectTimeout: number | null;
+  env: Record<string, string> | null;
+  headers: Record<string, string> | null;
+}

@@ -11,6 +11,9 @@ import { SecretDetailPage } from "@/pages/SecretDetailPage";
 import { ServiceAccountsPage } from "@/pages/ServiceAccountsPage";
 import { ServiceAccountDetailPage } from "@/pages/ServiceAccountDetailPage";
 import { AccessRolesPage } from "@/pages/AccessRolesPage";
+import { McpServersPage } from "@/pages/McpServersPage";
+import { McpServerDetailPage } from "@/pages/McpServerDetailPage";
+import { McpAssignmentsPage } from "@/pages/McpAssignmentsPage";
 import { AuditPage } from "@/pages/AuditPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
@@ -35,6 +38,9 @@ export function App() {
         <Route path="/service-accounts" element={<ServiceAccountsPage />} />
         <Route path="/service-accounts/:saId" element={<ServiceAccountDetailPage />} />
         <Route path="/access" element={<AccessRolesPage />} />
+        <Route path="/mcp-servers" element={<McpServersPage />} />
+        <Route path="/mcp-servers/:id" element={<McpServerDetailPage />} />
+        <Route path="/mcp-assignments" element={<McpAssignmentsPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
