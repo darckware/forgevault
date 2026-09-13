@@ -312,6 +312,89 @@ public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : ICla
         Assert.Equal("revoked", JsonDocument.Parse(revokeText!).RootElement.GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task AdminMcpRegisterAssignRevoke_ViaMcp_AreRbacGated_AndEnforceRoleAssignmentInvariant()
+    {
+        // docs/modules/11_MCP_REGISTRY.md §13 AC-01/AC-02/AC-03, on the MCP tool surface
+        // (admin.mcp.register/assign/revoke_assignment) — the REST equivalents are covered by
+        // ForgeVault.Security.Tests.McpRegistryEndpointTests.
+        var (owner, ownerId) = await CreateAuthenticatedClientAsync();
+        var (stranger, _) = await CreateAuthenticatedClientAsync();
+        var (_, agentId) = await CreateAuthenticatedClientAsync(); // No RoleAssignment granted yet — needed for AC-03.
+
+        var orgResponse = await owner.PostAsJsonAsync("/api/v1/organizations", new
+        {
+            name = $"acme-{Guid.NewGuid():N}",
+            slug = $"acme-{Guid.NewGuid():N}",
+        });
+        var organization = await orgResponse.Content.ReadFromJsonAsync<IdResponse>();
+        await GrantRoleAsync(ownerId, Role.Owner, RoleScopeType.Organization, organization!.Id);
+
+        // AC-02 (register leg): denied without McpRegistryWrite.
+        var (deniedRegisterIsError, deniedRegisterText) = await CallToolAsync(stranger, "admin.mcp.register", new
+        {
+            organizationId = organization.Id,
+            name = $"forgehub-{Guid.NewGuid():N}",
+            transport = "Stdio",
+            command = "forgehub-mcp-server",
+        });
+        Assert.True(deniedRegisterIsError);
+        Assert.Contains("forbidden", deniedRegisterText, StringComparison.Ordinal);
+
+        // AC-01: Owner registers successfully and it is audited.
+        var (registerIsError, registerText) = await CallToolAsync(owner, "admin.mcp.register", new
+        {
+            organizationId = organization.Id,
+            name = $"forgehub-{Guid.NewGuid():N}",
+            transport = "Stdio",
+            command = "forgehub-mcp-server",
+        });
+        Assert.False(registerIsError);
+        var definitionId = JsonDocument.Parse(registerText!).RootElement.GetProperty("id").GetGuid();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+            await db.AuditLogs.SingleAsync(a => a.ResourceId == definitionId && a.Action == "MCP_SERVER_REGISTERED");
+        }
+
+        // AC-02 (assign leg): denied without McpRegistryWrite.
+        var (deniedAssignIsError, deniedAssignText) = await CallToolAsync(stranger, "admin.mcp.assign", new
+        {
+            identityId = agentId,
+            mcpServerDefinitionId = definitionId,
+            paramValuesJson = "{}",
+        });
+        Assert.True(deniedAssignIsError);
+        Assert.Contains("forbidden", deniedAssignText, StringComparison.Ordinal);
+
+        // AC-03: the target identity has no active RoleAssignment anywhere yet.
+        var (noRoleIsError, noRoleText) = await CallToolAsync(owner, "admin.mcp.assign", new
+        {
+            identityId = agentId,
+            mcpServerDefinitionId = definitionId,
+            paramValuesJson = "{}",
+        });
+        Assert.True(noRoleIsError);
+        Assert.Contains("identity_has_no_role_assignment", noRoleText, StringComparison.Ordinal);
+
+        await GrantRoleAsync(agentId, Role.Developer, RoleScopeType.Organization, organization.Id);
+
+        var (assignIsError, assignText) = await CallToolAsync(owner, "admin.mcp.assign", new
+        {
+            identityId = agentId,
+            mcpServerDefinitionId = definitionId,
+            paramValuesJson = "{}",
+        });
+        Assert.False(assignIsError);
+        var assignmentId = JsonDocument.Parse(assignText!).RootElement.GetProperty("id").GetGuid();
+
+        // AC-02 (revoke leg): denied without McpRegistryWrite.
+        var (deniedRevokeIsError, deniedRevokeText) = await CallToolAsync(stranger, "admin.mcp.revoke_assignment", new { mcpAssignmentId = assignmentId });
+        Assert.True(deniedRevokeIsError);
+        Assert.Contains("forbidden", deniedRevokeText, StringComparison.Ordinal);
+    }
+
     private static async Task<List<string>> ListToolNamesAsync(HttpClient client)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/mcp") { Content = JsonRpcContent("tools/list", new { }) };

@@ -19,7 +19,58 @@ public sealed class McpAssignmentRenderTests(LoggingWebApplicationFactory factor
     [Fact]
     public async Task Render_AfterRevoke_Is409_DoesNotLeakSecret_AndAudits()
     {
-        const string secretValue = "sk-mcp-render-after-revoke-do-not-leak";
+        var (owner, agent, secretValue, secretId, assignmentId) = await SetupSelfRenderableAssignmentAsync();
+
+        // Before revoke: the assigned agent can render and gets the decrypted value.
+        var firstRender = await agent.GetAsync($"/api/v1/mcp-assignments/{assignmentId}/render");
+        Assert.Equal(HttpStatusCode.OK, firstRender.StatusCode);
+        var rendered = await firstRender.Content.ReadFromJsonAsync<RenderResponseDto>();
+        Assert.Equal(secretValue, rendered!.Env!["FORGEHUB_AGENT_TOKEN"]);
+
+        var revokeResponse = await owner.PostAsync($"/api/v1/mcp-assignments/{assignmentId}/revoke", content: null);
+        Assert.Equal(HttpStatusCode.OK, revokeResponse.StatusCode);
+
+        // The exact repro from the module spec: the same assignmentId, same caller, called
+        // again right after revoke. Must no longer resolve — 409, not 200 — and the body must
+        // never contain the plaintext secret.
+        var secondRender = await agent.GetAsync($"/api/v1/mcp-assignments/{assignmentId}/render");
+        Assert.Equal(HttpStatusCode.Conflict, secondRender.StatusCode);
+        var secondBody = await secondRender.Content.ReadAsStringAsync();
+        Assert.Contains("assignment_revoked", secondBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretValue, secondBody, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        var deniedLog = await db.AuditLogs.SingleAsync(a =>
+            a.ResourceId == assignmentId && a.Action == "FAILED_ACCESS" && a.ResourceType == "mcp_server_assignment");
+        Assert.Contains("assignment_revoked", deniedLog.Metadata, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretValue, deniedLog.Metadata, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Render_Self_AuditsSecretReveal_WithoutLeakingValueInTheAuditRow()
+    {
+        // AC-04 (docs/modules/11_MCP_REGISTRY.md §13), isolated: the render itself is already
+        // exercised as setup in the revoke test above, but that test never asserts the
+        // SECRET_REVEAL audit row directly — this one does.
+        var (_, agent, secretValue, secretId, assignmentId) = await SetupSelfRenderableAssignmentAsync();
+
+        var render = await agent.GetAsync($"/api/v1/mcp-assignments/{assignmentId}/render");
+        Assert.Equal(HttpStatusCode.OK, render.StatusCode);
+        var rendered = await render.Content.ReadFromJsonAsync<RenderResponseDto>();
+        Assert.Equal(secretValue, rendered!.Env!["FORGEHUB_AGENT_TOKEN"]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        var revealLog = await db.AuditLogs.SingleAsync(a =>
+            a.ResourceId == secretId && a.Action == "SECRET_REVEAL" && a.ResourceType == "secret");
+        Assert.Contains("mcp_render", revealLog.Metadata, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretValue, revealLog.Metadata, StringComparison.Ordinal);
+    }
+
+    private async Task<(HttpClient Owner, HttpClient Agent, string SecretValue, Guid SecretId, Guid AssignmentId)> SetupSelfRenderableAssignmentAsync()
+    {
+        var secretValue = $"sk-mcp-render-{Guid.NewGuid():N}";
 
         var (owner, ownerId) = await CreateAuthenticatedClientAsync();
         var (agent, agentId) = await CreateAuthenticatedClientAsync();
@@ -79,30 +130,7 @@ public sealed class McpAssignmentRenderTests(LoggingWebApplicationFactory factor
         Assert.Equal(HttpStatusCode.Created, assignResponse.StatusCode);
         var assignment = await assignResponse.Content.ReadFromJsonAsync<IdResponse>();
 
-        // Before revoke: the assigned agent can render and gets the decrypted value.
-        var firstRender = await agent.GetAsync($"/api/v1/mcp-assignments/{assignment!.Id}/render");
-        Assert.Equal(HttpStatusCode.OK, firstRender.StatusCode);
-        var rendered = await firstRender.Content.ReadFromJsonAsync<RenderResponseDto>();
-        Assert.Equal(secretValue, rendered!.Env!["FORGEHUB_AGENT_TOKEN"]);
-
-        var revokeResponse = await owner.PostAsync($"/api/v1/mcp-assignments/{assignment.Id}/revoke", content: null);
-        Assert.Equal(HttpStatusCode.OK, revokeResponse.StatusCode);
-
-        // The exact repro from the module spec: the same assignmentId, same caller, called
-        // again right after revoke. Must no longer resolve — 409, not 200 — and the body must
-        // never contain the plaintext secret.
-        var secondRender = await agent.GetAsync($"/api/v1/mcp-assignments/{assignment.Id}/render");
-        Assert.Equal(HttpStatusCode.Conflict, secondRender.StatusCode);
-        var secondBody = await secondRender.Content.ReadAsStringAsync();
-        Assert.Contains("assignment_revoked", secondBody, StringComparison.Ordinal);
-        Assert.DoesNotContain(secretValue, secondBody, StringComparison.Ordinal);
-
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
-        var deniedLog = await db.AuditLogs.SingleAsync(a =>
-            a.ResourceId == assignment.Id && a.Action == "FAILED_ACCESS" && a.ResourceType == "mcp_server_assignment");
-        Assert.Contains("assignment_revoked", deniedLog.Metadata, StringComparison.Ordinal);
-        Assert.DoesNotContain(secretValue, deniedLog.Metadata, StringComparison.Ordinal);
+        return (owner, agent, secretValue, secret.Id, assignment!.Id);
     }
 
     private async Task GrantRoleAsync(Guid identityId, Role role, RoleScopeType scopeType, Guid scopeId)
