@@ -21,6 +21,7 @@ public sealed class ForgeVaultDbContext(DbContextOptions<ForgeVaultDbContext> op
     public DbSet<ServiceAccountToken> ServiceAccountTokens => Set<ServiceAccountToken>();
     public DbSet<McpServerDefinition> McpServerDefinitions => Set<McpServerDefinition>();
     public DbSet<McpServerAssignment> McpServerAssignments => Set<McpServerAssignment>();
+    public DbSet<SecretAccessGrant> SecretAccessGrants => Set<SecretAccessGrant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

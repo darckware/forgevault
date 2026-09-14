@@ -208,6 +208,7 @@ export function UserMenu() {
 
         {open && (
           <div className="absolute inset-x-3 bottom-full z-20 mb-1 overflow-hidden rounded-md border border-vault-surface-border bg-vault-bg py-1 shadow-xl">
+            <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Conta</p>
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-vault-surface-dim hover:text-slate-100"

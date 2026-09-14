@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/ForgeVault.Api/ForgeVault.Api.csproj" />
     <Project Path="src/ForgeVault.Application/ForgeVault.Application.csproj" />
+    <Project Path="src/ForgeVault.Cli/ForgeVault.Cli.csproj" />
     <Project Path="src/ForgeVault.Domain/ForgeVault.Domain.csproj" />
     <Project Path="src/ForgeVault.Infrastructure/ForgeVault.Infrastructure.csproj" />
     <Project Path="src/ForgeVault.Worker/ForgeVault.Worker.csproj" />

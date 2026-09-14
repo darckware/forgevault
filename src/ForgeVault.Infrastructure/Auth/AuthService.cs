@@ -35,6 +35,16 @@ public sealed class AuthService(
             return new AuthFailure("invalid_credentials");
         }
 
+        if (!user.IsActive)
+        {
+            // Deliberately after credential verification (unlike the invalid_credentials
+            // branch above, which must not distinguish "no such user" from "wrong
+            // password") — a deactivated account is a real, actor-visible state, not an
+            // enumeration risk, same as ServiceAccountAuthenticationHandler's IsActive check.
+            logger.LogInformation("Login rejected: account is deactivated.");
+            return new AuthFailure("account_disabled");
+        }
+
         if (user.MfaEnabled)
         {
             if (string.IsNullOrWhiteSpace(mfaCode))

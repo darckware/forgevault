@@ -71,7 +71,8 @@ forgevault/
 │   ├── ForgeVault.Infrastructure/  # EF Core, criptografia, JWT, RBAC
 │   ├── ForgeVault.Api/             # Web API — REST + MCP Server
 │   ├── ForgeVault.Worker/          # jobs em background
-│   └── ForgeVault.Web/             # frontend (não implementado ainda)
+│   ├── ForgeVault.Web/             # frontend (React + TypeScript)
+│   └── ForgeVault.Cli/             # CLI `fv` — cliente puro sobre a API (módulo 08)
 ├── tests/
 │   └── Unit/, Integration/, Security/, E2E/
 ├── deploy/
@@ -155,6 +156,31 @@ python3 deploy/scripts/import_env.py \
   --email admin@darckware.local   # senha pedida interativamente, nunca por argumento
 # --dry-run mostra o que seria importado sem cadastrar nada
 ```
+
+`import_env.py` resolve só a metade do problema — cadastra o que já estava no `.env`, mas não
+tira a dependência do arquivo em si. Para isso existe a CLI `fv` (`src/ForgeVault.Cli`,
+`docs/modules/08_CLI_SDK.md`): depois do import, o sistema consumidor (ForgeHub, ForgeRouter,
+Darckware) pode apagar o `.env` e passar a rodar via `fv exec`, que busca os secrets do
+Environment em tempo de execução e injeta como variáveis de ambiente só no processo filho —
+nunca grava nada em disco.
+
+```bash
+dotnet build src/ForgeVault.Cli   # gera bin/Debug/net10.0/fv
+
+fv login --url http://127.0.0.1:8080 --token fv_sa_...   # ServiceAccount — recomendado p/ CI
+# ou: fv login --url http://127.0.0.1:8080 --email dev@example.com
+
+fv credential list --environment <guid-do-environment>
+fv exec --environment <guid-do-environment> -- docker compose up
+# FORGEVAULT_URL / FORGEVAULT_TOKEN substituem a sessão local — útil num runner de CI que
+# nunca chama `fv login`.
+
+fv export --environment <guid-do-environment>   # escape hatch de debug local — nunca em produção
+```
+
+Cobre hoje `login`/`logout`/`whoami`, `credential list`, `exec` e `export` — o restante da
+superfície de `docs/modules/08_CLI_SDK.md §7` (`credential rotate/revoke`, `access.*`,
+`session.*`, `token.*`, `audit search`) ainda não foi implementado.
 
 ## API
 

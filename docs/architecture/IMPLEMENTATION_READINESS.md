@@ -99,6 +99,68 @@ UI (`McpServersPage`/`McpServerDetailPage`/`McpAssignmentsPage` em `src/ForgeVau
 
 Este marco **não** inclui: aplicar a config renderizada a um host de agente real (o script `deploy/scripts/sync_mcp_config.py` citado nos comentários de código não existe neste repositório).
 
+## 3.4. Marco de Engenharia da Onda 2 — M11 (acesso por credencial específica)
+
+Motivado por uma limitação real de `RoleAssignment` (módulo 04): é sempre por escopo inteiro (Organization/Project/Environment) — não existia forma de dar a um agente acesso a **uma** credencial específica (um login de site, uma credencial de banco, um token de provider) sem também dar acesso a tudo mais naquele Environment.
+
+| Entrega | Detalhe |
+|---|---|
+| `SecretAccessGrant` (nova entidade) | vínculo direto "esta identidade pode ler este Secret", independente de qualquer `RoleAssignment`. Mesmo princípio que `McpServerAssignment` já usava internamente para self-render (`McpAssignmentRenderer`: "self-render trusts the assignment"), generalizado para funcionar também contra `GET /secrets/{id}/value` e `credential.request` diretamente, não só dentro do render de config MCP |
+| `SecretAccessAuthorizer` (`src/ForgeVault.Api/SecretAccessAuthorizer.cs`) | helper único compartilhado pelo endpoint REST de reveal e pela tool `credential.request` — acesso é RBAC de escopo OU grant específico, nunca lógica duplicada entre as duas superfícies (mesmo princípio do módulo 09 §12, reaplicado) |
+| `SecretAccessGrantEndpoints.cs` (4 endpoints REST) + 2 tools MCP (`admin.secret.grant_access`, `admin.secret.revoke_access`) | gated por `SecretWrite` no escopo do secret — quem já pode gerenciar o secret decide quem mais pode lê-lo; idempotente por (secret, identity) igual ao padrão de `RoleAssignment`/`McpServerAssignment` |
+| UI (`SecretDetailPage`, aba "Access") | listar/conceder/revogar por id colado — mesmo padrão de `AccessRolesPage` (sem endpoint de busca de identidade) |
+| Sem nova `Permission` | reaproveita `SecretWrite` (para grant/revoke) e `RoleAssignmentWrite` (para a listagem "o que esta identidade pode acessar", mesma view de governança de `GET /identities/{id}/role-assignments`) — decisão deliberada para não inflar a matriz de permissões por uma única listagem read-only |
+| Formulário estruturado por tipo (`src/ForgeVault.Web/src/lib/secretValue.ts`) | `Secret.Type` já classificava `Password`/`DatabaseCredential`/etc. desde o M4, mas o formulário sempre tratou todo tipo como um único campo de texto — agora `Password` (login de site: URL/usuário/senha) e `DatabaseCredential` (host/porta/banco/usuário/senha) têm campos próprios, codificados como JSON dentro do mesmo `Value` de sempre (sem mudança de schema/migration no backend); reveal decodifica de volta para os mesmos campos quando aplicável |
+
+Testes: `tests/Security/ForgeVault.Security.Tests/SecretAccessGrantEndpointTests.cs` (grant sem nenhum `RoleAssignment` permite reveal, RBAC no grant/revoke, idempotência, revoke remove acesso efetivo e audita sem vazar o valor, grant é aditivo — RBAC de escopo continua funcionando sozinho).
+
+## 3.5. Marco de Engenharia da Onda 2 — M12 (CLI `fv`, módulo 08)
+
+Motivado pela outra metade do problema do `.env`: `deploy/scripts/import_env.py` (M10) cadastra credenciais que já estavam num `.env`, mas não tira a dependência do arquivo em si — um sistema consumidor (ForgeHub, ForgeRouter, Darckware) ainda precisava reescrever seu próprio código para chamar a API do ForgeVault, ou continuar lendo de um `.env` estático.
+
+| Entrega | Detalhe |
+|---|---|
+| `src/ForgeVault.Cli` (novo projeto, `AssemblyName=fv`) | zero `ProjectReference` para Domain/Infrastructure/Application (docs/modules/08_CLI_SDK.md §2: "este módulo é puramente cliente") — só `HttpClient`/`System.Text.Json` da BCL, sem parser de CLI de terceiros, para compilar offline sem superfície de NuGet nova |
+| `fv login` (humano via email/senha, ou `--token fv_sa_...` de ServiceAccount) / `fv logout` / `fv whoami` | sessão local em `~/.forgevault/cli-session.json` (chmod 600) — mesma pasta que `LocalFileKeyProvider` já usa para a Master Key no servidor, mesma convenção "arquivo local, sem keychain do SO" registrada como simplificação conhecida (módulo 08 §12 pede keychain; MVP não tem) |
+| `fv exec --environment <id> -- <comando>` | busca todos os secrets `Active` do Environment, decripta cada um (audita `SECRET_REVEAL` normalmente — não é bypass) e injeta como variáveis de ambiente **só no processo filho**, nunca em disco — a peça que faltava para um sistema parar de depender de `.env` sem reescrever código algum: só troca `docker compose up` por `fv exec --environment <id> -- docker compose up` |
+| `fv export --environment <id>` | escape hatch de debug local (módulo 08 UC-03/invariante 1) — sempre imprime o aviso de que não é o caminho de produção, sem flag para suprimir |
+| `fv credential list --environment <id>` | metadados apenas, nunca valor |
+| `FORGEVAULT_URL`/`FORGEVAULT_TOKEN` (env vars) | alternativa a `fv login` para um runner de CI — nenhuma sessão em disco é necessária |
+| Superfície não implementada (documentado, não escondido) | `credential metadata/rotate/revoke`, `access.*`, `session.*`, `token.*`, `audit search` (docs/modules/08_CLI_SDK.md §7) — a CLI cobre hoje só o caminho que motivou construí-la, não a spec inteira |
+
+Testado manualmente ponta a ponta contra uma API real (Postgres isolado, fora do banco de dev): login humano e via token de ServiceAccount, `whoami`, `credential list`, `exec` provando injeção real (valor aparece só no processo filho, nunca hardcoded), `export` gerando o arquivo com o aviso. Nenhum teste automatizado dedicado ainda (E2E/Integration) — ver seção 6.
+
+## 3.6. Marco de Engenharia da Onda 2 — M13 (administração de Users)
+
+Motivado por um gap presente desde o primeiro commit: não existia nenhuma forma de criar uma conta humana (`User`) pela própria aplicação — todo `CreateAuthenticatedClientAsync` de teste, e o próprio reset do e-mail do administrador nesta revisão, dependeram de um `INSERT` direto no Postgres. Mesmo tipo de lacuna que `RoleAssignmentWrite` (M9) fechou para concessão de papéis.
+
+| Entrega | Detalhe |
+|---|---|
+| `User.IsActive` (novo campo, default `true`) | mesma convenção de `ServiceAccount.IsActive`; checado em `AuthService.LoginAsync` — login de conta desativada falha com `401 account_disabled`, verificado depois das credenciais (diferente do `invalid_credentials` genérico, que deliberadamente nunca distingue "não existe" de "senha errada") |
+| `Permission.UserManage` (nova) | Owner/Admin apenas, mesmo padrão de `RoleAssignmentWrite`/`McpRegistryWrite`; checado só via `HasPermissionAnywhereAsync` porque um `User` não pertence a uma Organization — quem o vincula a um escopo é o `RoleAssignment`, não o `User` em si |
+| `UserEndpoints.cs` (`POST`/`GET /api/v1/users`, `POST .../deactivate`, `POST .../reactivate`) | cria com email+senha inicial (compartilhada fora de banda, sem fluxo de "trocar no primeiro login" ainda); `409 cannot_deactivate_self` — mesmo princípio de "ator não pode se auto-estrandar" já usado em `admin.role.grant` |
+| UI (`UsersPage`, item "Users" na sidebar) | listar/criar/desativar/reativar |
+| Ajuste de UX no `UserMenu` | rótulo de seção "Conta" adicionado para aproximar do agrupamento visual do `UserSettingsMenu` do ForgeHub — trocador de tema/idioma e modal "Sobre" do ForgeHub **não** replicados, por decisão já registrada em `docs/architecture/TARGET_ARCHITECTURE.md` §10 (ForgeVault tem design system próprio, não reusa o do ForgeHub) |
+
+Testes: `tests/Security/ForgeVault.Security.Tests/UserEndpointTests.cs` (RBAC no create/list, e-mail duplicado, senha curta, ciclo completo criar→logar→desativar→login bloqueado→reativar→login funciona de novo, não pode desativar a si mesmo).
+
+## 3.7. Marco de Engenharia da Onda 2 — M14 (módulo 07: revoke em cascata + impact analysis)
+
+`docs/modules/07_LIFECYCLE_ROTATION_REVOCATION.md` tinha uma `open_blocking_question` não resolvida ("modelo exato de CredentialBinding/dependency mapping"). Decisão desta revisão: em vez de uma entidade `CredentialBinding` genérica (§80 do `ForgeVault.md`), os dois vínculos "identidade → este secret específico" que já existem no código (`SecretAccessGrant`, M11; `McpServerAssignment`, M10) são exatamente o dependency mapping que §108/§109 pedem — não havia necessidade de inventar uma terceira entidade para o mesmo conceito. Fecha a questão bloqueante para este escopo específico; RotationPolicy/CredentialHealth (§111, validação de credencial no provider) continuam de fora — dependem de um catálogo de integração por provider que não existe (module 07 §2 já listava isso como fora do escopo).
+
+| Entrega | Detalhe |
+|---|---|
+| `POST /api/v1/secrets/{id}/revoke` agora com cascade | revoga (RevokedAt) todo `SecretAccessGrant` e todo `McpServerAssignment` que referencia o secret via `{"secretId": ...}`, e devolve as contagens (`RevokedAccessGrants`/`RevokedMcpAssignments`) na resposta — `SecretRevokeResponse` é um superset de campos de `SecretResponse` (aditivo, não quebra nenhum consumidor existente) |
+| Fronteira deliberada: `RoleAssignment` nunca é tocado pelo cascade | um papel no escopo do Environment dá acesso a *todos* os secrets ali — revogar um único secret jamais deve tirar silenciosamente o acesso de alguém a todos os outros; só os vínculos "este secret especificamente" (`SecretAccessGrant`/`McpServerAssignment`) cascadeiam |
+| `GET /api/v1/secrets/{id}/impact` (novo) + `IPermissionChecker.ListIdentitiesWithPermissionAsync` (novo método) | lista, antes de uma operação destrutiva: identidades com role que concede `SecretReadValue` no escopo do secret, identidades com `SecretAccessGrant` ativo, e ids de `McpServerAssignment` ativos que referenciam o secret |
+| `admin.secret.revoke` (MCP) e `admin.secret.impact` (MCP, novo) | mesma lógica compartilhada com REST (`SecretEndpoints.ToRevokeResponse`/`RevokeMcpAssignmentsReferencingSecretAsync`/`FindMcpAssignmentIdsReferencingSecretAsync`, agora `internal` para reuso entre as duas superfícies) |
+
+Testes: `tests/Security/ForgeVault.Security.Tests/SecretRevokeCascadeTests.cs` — cria um `SecretAccessGrant` e um `McpServerAssignment` apontando pro mesmo secret, confirma `impact` os lista antes do revoke, confirma o revoke cascadeia e conta certo, confirma idempotência (segunda chamada conta zero), e confirma explicitamente que o `RoleAssignment` do agente no Environment **sobrevive** ao revoke do secret.
+
+### Métricas do MCP Registry (fecha parcialmente a open_blocking_question do módulo 11)
+
+`mcp_server_renders_total` (`src/ForgeVault.Api/Observability/McpMetrics.cs`), incrementado em cada saída de `McpAssignmentRenderer.RenderAsync` (tag `outcome`: Success/Forbidden/AssignmentRevoked/etc.) — só `System.Diagnostics.Metrics` da BCL, sem pipeline de export (Prometheus/OTLP) — nenhum exportador existe neste projeto ainda, e escolher um é uma decisão de infraestrutura maior do que este gap específico. Observável hoje via `dotnet-counters monitor ForgeVault.Mcp` sem configuração extra; um exportador futuro só precisaria de `AddMeter("ForgeVault.Mcp")`. `mcp_calls_total` (nível de todas as tools MCP, não só registry) continua sem implementar — instrumentar as ~20 tools uma a uma ficou fora do escopo desta revisão, que era especificamente "métricas do MCP Registry".
+
 ## 4. Decisões de Design Já Fixadas para a Onda 1
 
 - **Modelo de dados**: `Organization → Project → Environment → Secret → SecretVersion → AuditLog` (§11), não o modelo multi-tenant de §81/§107. Justificativa: o próprio roadmap (§63) coloca "multi-tenant avançado" na Fase 4; o modelo simples satisfaz literalmente todos os critérios de aceite do MVP; migrar para `Tenant/Workspace` depois é aditivo (inserir camada acima), enquanto o caminho inverso seria disruptivo. Nomenclatura de `secret_versions` segue a DDL de §83 (`ciphertext`, `encrypted_dek`, `nonce`, `auth_tag`, `algorithm`), não os nomes mais antigos de §11.

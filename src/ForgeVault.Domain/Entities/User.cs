@@ -14,6 +14,10 @@ public sealed class User
     // not activate enforcement (docs/modules/02_IDENTITY_AND_AUTHENTICATION.md §5 UC-05).
     public bool MfaEnabled { get; set; }
 
+    // Same convention as ServiceAccount.IsActive — deactivating a User must block login
+    // immediately (AuthService.LoginAsync) without deleting the row or its audit trail.
+    public bool IsActive { get; set; } = true;
+
     // The TOTP secret, envelope-encrypted with the same crypto module as Secret values
     // (docs/modules/02_IDENTITY_AND_AUTHENTICATION.md §4: "criptografado como um secret,
     // reusa módulo 03") — four separate columns, mirroring SecretVersion, rather than one

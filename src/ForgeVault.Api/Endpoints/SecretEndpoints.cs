@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using ForgeVault.Api.Auditing;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Application.Security;
@@ -231,8 +232,9 @@ public static class SecretEndpoints
 
             // Every attempt is audited — including denials (docs/modules/06_AUDIT_AND_GOVERNANCE.md
             // §4 invariant 3 and AC-05: a negation without an audit row is exactly the failure
-            // mode this module exists to prevent).
-            if (!await permissions.HasPermissionAsync(actorId, Permission.SecretReadValue, scope, ct))
+            // mode this module exists to prevent). Access here is scope RBAC OR a narrower
+            // per-secret SecretAccessGrant (see SecretAccessAuthorizer) — either is sufficient.
+            if (!await SecretAccessAuthorizer.CanReadValueAsync(db, permissions, actorId, id, scope, ct))
             {
                 db.AuditLogs.Add(AuditLogFactory.Create(
                     actorId, actorType, "FAILED_ACCESS", "secret", id, requestId, """{"reason":"forbidden"}"""));
@@ -339,10 +341,18 @@ public static class SecretEndpoints
             return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
         });
 
-        // M8 (docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md, admin.secret.revoke).
-        // Minimal revoke: flips Status -> Revoked so no further read/write/reveal/rotate
-        // succeeds (docs/ForgeVault.md §102). Cascade to grants/sessions/leases and
-        // provider-side revocation stay module 07 (Fase 2) — those entities don't exist yet.
+        // M8 (docs/modules/09_FORGEHUB_FORGEROUTER_MCP_INTEGRATION.md, admin.secret.revoke),
+        // cascade added in M14 (docs/modules/07_LIFECYCLE_ROTATION_REVOCATION.md §102
+        // invariant 2 / UC-02 / AC-02): flips Status -> Revoked so no further
+        // read/write/reveal/rotate succeeds, AND revokes every SecretAccessGrant and
+        // McpServerAssignment binding that references this specific secret — the two
+        // concrete "who consumes this credential" relationships that actually exist in this
+        // codebase. Deliberately does NOT touch RoleAssignment: a scope-wide role isn't a
+        // binding to this one secret, it's access to the whole Environment, and revoking a
+        // secret must never silently take away someone's access to every other secret there
+        // — see the decision note in IMPLEMENTATION_READINESS.md for the full boundary.
+        // Provider-side revocation (§102 "revogar no provedor externo") stays out of scope —
+        // no provider integration catalog exists (module 07 §2 "fora do escopo").
         group.MapPost("/{id:guid}/revoke", async (
             Guid id,
             ForgeVaultDbContext db,
@@ -366,18 +376,115 @@ public static class SecretEndpoints
 
             if (secret.Status is SecretStatus.Revoked)
             {
-                // Idempotent — revoking an already-revoked secret is not an error.
-                return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
+                // Idempotent — revoking an already-revoked secret is not an error, and does
+                // not re-run the cascade (already-revoked grants/assignments stay as they are).
+                return Results.Ok(ToRevokeResponse(secret, 0, 0));
             }
 
+            var now = DateTimeOffset.UtcNow;
             secret.Status = SecretStatus.Revoked;
-            secret.UpdatedAt = DateTimeOffset.UtcNow;
+            secret.UpdatedAt = now;
 
-            db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_REVOKE", "secret", secret.Id, http.TraceIdentifier));
+            var revokedGrants = await db.SecretAccessGrants
+                .Where(g => g.SecretId == id && g.RevokedAt == null)
+                .ToListAsync(ct);
+            foreach (var grant in revokedGrants)
+            {
+                grant.RevokedAt = now;
+            }
+
+            var revokedAssignments = await RevokeMcpAssignmentsReferencingSecretAsync(db, id, now, ct);
+
+            db.AuditLogs.Add(AuditLogFactory.Create(
+                actorId, user.GetActorType(), "SECRET_REVOKE", "secret", secret.Id, http.TraceIdentifier,
+                $$"""{"revokedAccessGrants":{{revokedGrants.Count}},"revokedMcpAssignments":{{revokedAssignments}}}"""));
             await db.SaveChangesAsync(ct);
 
-            return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
+            return Results.Ok(ToRevokeResponse(secret, revokedGrants.Count, revokedAssignments));
         });
+
+        // docs/modules/07_LIFECYCLE_ROTATION_REVOCATION.md §108/§109 (dependency mapping /
+        // impact analysis) — "who would be affected by revoking or rotating this secret",
+        // surfaced before the destructive action rather than only recorded in the audit log
+        // afterwards. Same SecretWrite gate as rotate/revoke themselves: this is information
+        // for whoever is about to perform one of those, not a general-purpose read endpoint.
+        group.MapGet("/{id:guid}/impact", async (
+            Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, CancellationToken ct) =>
+        {
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
+            if (resolved is null)
+            {
+                return Results.NotFound();
+            }
+
+            var (_, scope) = resolved.Value;
+            if (!await permissions.HasPermissionAsync(user.GetUserId(), Permission.SecretWrite, scope, ct))
+            {
+                return Results.Forbid();
+            }
+
+            var roleConsumers = await permissions.ListIdentitiesWithPermissionAsync(Permission.SecretReadValue, scope, ct);
+            var accessGrantIdentityIds = await db.SecretAccessGrants
+                .Where(g => g.SecretId == id && g.RevokedAt == null)
+                .Select(g => g.IdentityId)
+                .ToListAsync(ct);
+            var mcpAssignmentIds = await FindMcpAssignmentIdsReferencingSecretAsync(db, id, ct);
+
+            return Results.Ok(new SecretImpactResponse(
+                id,
+                roleConsumers.Select(r => new RoleConsumer(r.IdentityId, r.Role)).ToList(),
+                accessGrantIdentityIds,
+                mcpAssignmentIds));
+        });
+    }
+
+    internal static SecretRevokeResponse ToRevokeResponse(Secret secret, int revokedAccessGrants, int revokedMcpAssignments) => new(
+        secret.Id, secret.EnvironmentId, secret.Name, secret.Type.ToString(), secret.Provider, secret.Description,
+        secret.Status.ToString(), secret.CurrentVersion, secret.CreatedAt, secret.UpdatedAt, secret.ExpiresAt,
+        revokedAccessGrants, revokedMcpAssignments);
+
+    // Shared by revoke (mutates) and impact analysis (read-only) — both need "which
+    // McpServerAssignment rows reference this secret", found by parsing each active
+    // assignment's ParamValuesJson for a {"secretId": "<this id>"} entry, same shape
+    // McpAssignmentRenderer already resolves at render time.
+    internal static bool AssignmentReferencesSecret(string paramValuesJson, Guid secretId)
+    {
+        using var doc = JsonDocument.Parse(paramValuesJson);
+        return doc.RootElement.EnumerateObject().Any(property =>
+            property.Value.ValueKind == JsonValueKind.Object &&
+            property.Value.TryGetProperty("secretId", out var secretIdElement) &&
+            secretIdElement.ValueKind == JsonValueKind.String &&
+            Guid.TryParse(secretIdElement.GetString(), out var referenced) &&
+            referenced == secretId);
+    }
+
+    internal static async Task<int> RevokeMcpAssignmentsReferencingSecretAsync(ForgeVaultDbContext db, Guid secretId, DateTimeOffset now, CancellationToken ct)
+    {
+        var activeAssignments = await db.McpServerAssignments.Where(a => a.RevokedAt == null).ToListAsync(ct);
+        var count = 0;
+        foreach (var assignment in activeAssignments)
+        {
+            if (AssignmentReferencesSecret(assignment.ParamValuesJson, secretId))
+            {
+                assignment.RevokedAt = now;
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    internal static async Task<List<Guid>> FindMcpAssignmentIdsReferencingSecretAsync(ForgeVaultDbContext db, Guid secretId, CancellationToken ct)
+    {
+        var activeAssignments = await db.McpServerAssignments
+            .Where(a => a.RevokedAt == null)
+            .Select(a => new { a.Id, a.ParamValuesJson })
+            .ToListAsync(ct);
+
+        return activeAssignments
+            .Where(a => AssignmentReferencesSecret(a.ParamValuesJson, secretId))
+            .Select(a => a.Id)
+            .ToList();
     }
 }
 
@@ -408,6 +515,31 @@ public sealed record SecretResponse(
     DateTimeOffset? ExpiresAt);
 
 public sealed record SecretVersionResponse(Guid Id, int Version, string Algorithm, Guid CreatedBy, DateTimeOffset CreatedAt);
+
+// Superset of SecretResponse's fields (structurally compatible with any caller that only
+// knows about SecretResponse) plus the two cascade counts from module 07's revoke.
+public sealed record SecretRevokeResponse(
+    Guid Id,
+    Guid EnvironmentId,
+    string Name,
+    string Type,
+    string? Provider,
+    string? Description,
+    string Status,
+    int CurrentVersion,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? ExpiresAt,
+    int RevokedAccessGrants,
+    int RevokedMcpAssignments);
+
+public sealed record RoleConsumer(Guid IdentityId, string Role);
+
+public sealed record SecretImpactResponse(
+    Guid SecretId,
+    List<RoleConsumer> RoleAssignmentConsumers,
+    List<Guid> AccessGrantIdentityIds,
+    List<Guid> McpAssignmentIds);
 
 // docs/ForgeVault.md §84 — standardized envelope; `Credentials` is only populated for
 // AccessMode == "REVEAL" (the only mode implemented as of M5).

@@ -190,6 +190,28 @@ export interface RoleAssignmentResponse {
   revokedAt: string | null;
 }
 
+// --- Users (M13 admin) ---
+export interface UserResponse {
+  id: string;
+  email: string;
+  mfaEnabled: boolean;
+  isActive: boolean;
+  createdAt: string;
+}
+
+// --- Secret Access Grants ---
+// Per-credential access, narrower than a RoleAssignment's whole scope — "this identity may
+// read exactly this Secret", independent of any Organization/Project/Environment role.
+export interface SecretAccessGrantResponse {
+  id: string;
+  secretId: string;
+  identityId: string;
+  grantedBy: string;
+  status: "active" | "revoked";
+  createdAt: string;
+  revokedAt: string | null;
+}
+
 // --- MCP Registry (M10) ---
 export const MCP_TRANSPORT_TYPES = ["Stdio", "Http"] as const;
 export type McpTransportType = (typeof MCP_TRANSPORT_TYPES)[number];

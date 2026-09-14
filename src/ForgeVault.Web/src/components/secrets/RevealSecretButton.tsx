@@ -3,13 +3,23 @@ import { Copy, Lock, ShieldAlert, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useRevealSecret } from "@/hooks/useSecrets";
+import { decodeStructuredValue, isStructuredSecretType } from "@/lib/secretValue";
+import type { SecretType } from "@/types/api";
 
 const REVEAL_SECONDS = 20;
 
 // The signature "vault door" interaction: closed lock -> confirm -> loading -> open lock
 // with a teal glow and a countdown -> auto-reseals. The plaintext lives only in this
 // component's own state for the countdown's duration, never in the react-query cache.
-export function RevealSecretButton({ secretId, secretName }: { secretId: string; secretName: string }) {
+export function RevealSecretButton({
+  secretId,
+  secretName,
+  secretType,
+}: {
+  secretId: string;
+  secretName: string;
+  secretType?: SecretType;
+}) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(REVEAL_SECONDS);
@@ -51,21 +61,45 @@ export function RevealSecretButton({ secretId, secretName }: { secretId: string;
   };
 
   if (revealedValue !== null) {
+    const structured = secretType && isStructuredSecretType(secretType) ? decodeStructuredValue(secretType, revealedValue) : null;
+
     return (
-      <div className="flex items-center gap-2 rounded-md border border-vault-accent-dark bg-vault-ink/40 px-3 py-2 shadow-vault-glow">
-        <Unlock className="h-4 w-4 text-vault-accent-bright" />
-        <code className="font-mono text-sm text-vault-accent-bright">{revealedValue}</code>
-        <button
-          onClick={() => navigator.clipboard.writeText(revealedValue).catch(() => undefined)}
-          className="text-slate-400 hover:text-vault-accent-bright"
-          aria-label="Copy value"
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>
-        <span className="ml-2 text-xs text-slate-500">{secondsLeft}s</span>
-        <Button variant="ghost" size="sm" onClick={hide}>
-          Hide now
-        </Button>
+      <div className="flex flex-col gap-2 rounded-md border border-vault-accent-dark bg-vault-ink/40 px-3 py-2 shadow-vault-glow">
+        <div className="flex items-center gap-2">
+          <Unlock className="h-4 w-4 shrink-0 text-vault-accent-bright" />
+          {structured ? (
+            <div className="flex flex-col gap-1">
+              {Object.entries(structured).map(([key, val]) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="w-20 shrink-0 text-xs uppercase text-slate-500">{key}</span>
+                  <code className="font-mono text-sm text-vault-accent-bright">{val}</code>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(val).catch(() => undefined)}
+                    className="text-slate-400 hover:text-vault-accent-bright"
+                    aria-label={`Copy ${key}`}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              <code className="font-mono text-sm text-vault-accent-bright">{revealedValue}</code>
+              <button
+                onClick={() => navigator.clipboard.writeText(revealedValue).catch(() => undefined)}
+                className="text-slate-400 hover:text-vault-accent-bright"
+                aria-label="Copy value"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
+          <span className="ml-2 text-xs text-slate-500">{secondsLeft}s</span>
+          <Button variant="ghost" size="sm" onClick={hide}>
+            Hide now
+          </Button>
+        </div>
       </div>
     );
   }

@@ -31,7 +31,8 @@ public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : ICla
             {
                 "admin.agent.register", "admin.audit.search", "admin.mcp.assign", "admin.mcp.register",
                 "admin.mcp.revoke_assignment", "admin.role.grant", "admin.role.revoke",
-                "admin.secret.create", "admin.secret.revoke", "admin.secret.rotate", "admin.secret.update",
+                "admin.secret.create", "admin.secret.grant_access", "admin.secret.impact", "admin.secret.revoke",
+                "admin.secret.revoke_access", "admin.secret.rotate", "admin.secret.update",
                 "capability.check", "credential.request", "mcp.render_config", "secret.metadata",
             },
             names.OrderBy(n => n, StringComparer.Ordinal));

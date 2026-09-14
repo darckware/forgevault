@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useForm } from "react-hook-form";
 import { useParams } from "react-router-dom";
 import { RefreshCw, ShieldOff } from "lucide-react";
@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Tabs } from "@/components/ui/Tabs";
 import { Spinner } from "@/components/ui/Spinner";
+import { Badge } from "@/components/ui/Badge";
+import { Table } from "@/components/ui/Table";
+import { MonoId } from "@/components/ui/MonoId";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { RevealSecretButton } from "@/components/secrets/RevealSecretButton";
 import { SecretStatusBadge } from "@/components/secrets/SecretStatusBadge";
@@ -15,7 +19,9 @@ import { SecretVersionsTable } from "@/components/secrets/SecretVersionsTable";
 import { formatDateTime } from "@/lib/format";
 import { useEnvironment } from "@/hooks/useEnvironments";
 import { useRevokeSecret, useRotateSecret, useSecret, useUpdateSecret } from "@/hooks/useSecrets";
+import { useGrantSecretAccess, useRevokeSecretAccessGrant, useSecretAccessGrants } from "@/hooks/useSecretAccessGrants";
 import { ApiError } from "@/lib/api";
+import type { SecretAccessGrantResponse } from "@/types/api";
 
 interface ValueFormValues {
   value: string;
@@ -32,9 +38,15 @@ export function SecretDetailPage() {
   const [activeTab, setActiveTab] = useState("details");
   const [rotateOpen, setRotateOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [grantIdentityId, setGrantIdentityId] = useState("");
+  const [grantError, setGrantError] = useState<string | null>(null);
 
   const updateForm = useForm<ValueFormValues>();
   const rotateForm = useForm<ValueFormValues>();
+
+  const { data: accessGrants, isLoading: grantsLoading } = useSecretAccessGrants(secretId);
+  const grantAccess = useGrantSecretAccess(secretId!);
+  const revokeAccessGrant = useRevokeSecretAccessGrant(secretId!);
 
   if (isLoading || !secret) {
     return <Spinner />;
@@ -60,6 +72,17 @@ export function SecretDetailPage() {
       rotateForm.reset();
     } catch (err) {
       setError(err instanceof ApiError ? (err.body?.error ?? err.message) : "Failed to rotate");
+    }
+  };
+
+  const onGrantAccess = async (e: FormEvent) => {
+    e.preventDefault();
+    setGrantError(null);
+    try {
+      await grantAccess.mutateAsync(grantIdentityId);
+      setGrantIdentityId("");
+    } catch (err) {
+      setGrantError(err instanceof ApiError ? (err.body?.error ?? err.message) : "Failed to grant access");
     }
   };
 
@@ -96,7 +119,7 @@ export function SecretDetailPage() {
           </div>
           <div className="flex items-center gap-3">
             <SecretStatusBadge status={secret.status} />
-            <RevealSecretButton secretId={secret.id} secretName={secret.name} />
+            <RevealSecretButton secretId={secret.id} secretName={secret.name} secretType={secret.type} />
           </div>
         </div>
         {secret.expiresAt && <p className="mt-2 text-xs text-slate-500">Expires: {formatDateTime(secret.expiresAt)}</p>}
@@ -107,11 +130,66 @@ export function SecretDetailPage() {
           tabs={[
             { id: "details", label: "Details" },
             { id: "versions", label: "Versions" },
+            { id: "access", label: "Access" },
           ]}
           activeId={activeTab}
           onChange={setActiveTab}
         >
-          {activeTab === "details" ? (
+          {activeTab === "access" ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-slate-400">
+                Identities granted here can read this secret's value directly, regardless of any Role they hold — use it to
+                give a single agent exactly one credential (e.g. a site login, a database credential, a provider token)
+                without also handing it everything else in this Environment.
+              </p>
+
+              <form onSubmit={onGrantAccess} className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input
+                    label="Identity id"
+                    value={grantIdentityId}
+                    onChange={(e) => setGrantIdentityId(e.target.value)}
+                    placeholder="paste a User or ServiceAccount id"
+                  />
+                </div>
+                <Button type="submit" isLoading={grantAccess.isPending}>
+                  Grant access
+                </Button>
+              </form>
+              {grantError && <p className="text-sm text-vault-danger">{grantError}</p>}
+
+              {grantsLoading ? (
+                <Spinner />
+              ) : !accessGrants || accessGrants.length === 0 ? (
+                <EmptyState message="No identity has been granted direct access to this secret." />
+              ) : (
+                <Table<SecretAccessGrantResponse>
+                  keyField="id"
+                  rows={accessGrants}
+                  columns={[
+                    { key: "identityId", header: "Identity", render: (g) => <MonoId value={g.identityId} /> },
+                    { key: "status", header: "Status", render: (g) => <Badge tone={g.status === "active" ? "success" : "danger"}>{g.status}</Badge> },
+                    { key: "createdAt", header: "Granted", render: (g) => formatDateTime(g.createdAt) },
+                    {
+                      key: "actions",
+                      header: "",
+                      render: (g) =>
+                        g.status === "active" && (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => revokeAccessGrant.mutate(g.id)}
+                            isLoading={revokeAccessGrant.isPending}
+                          >
+                            Revoke
+                          </Button>
+                        ),
+                    },
+                  ]}
+                />
+              )}
+            </div>
+          ) : activeTab === "details" ? (
             <div className="flex flex-col gap-6">
               <form onSubmit={updateForm.handleSubmit(onUpdate)} className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-slate-300">Update value (creates a new version)</h3>

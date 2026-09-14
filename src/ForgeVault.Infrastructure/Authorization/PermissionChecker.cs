@@ -30,4 +30,22 @@ public sealed class PermissionChecker(ForgeVaultDbContext db) : IPermissionCheck
 
         return roles.Any(role => RolePermissions.Grants(role, permission));
     }
+
+    public async Task<List<(Guid IdentityId, string Role)>> ListIdentitiesWithPermissionAsync(Permission permission, ResourceScope scope, CancellationToken ct)
+    {
+        var candidates = await db.RoleAssignments
+            .Where(r => r.RevokedAt == null)
+            .Where(r =>
+                (r.ScopeType == RoleScopeType.Organization && scope.OrganizationId != null && r.ScopeId == scope.OrganizationId) ||
+                (r.ScopeType == RoleScopeType.Project && scope.ProjectId != null && r.ScopeId == scope.ProjectId) ||
+                (r.ScopeType == RoleScopeType.Environment && scope.EnvironmentId != null && r.ScopeId == scope.EnvironmentId))
+            .Select(r => new { r.IdentityId, r.Role })
+            .ToListAsync(ct);
+
+        return candidates
+            .Where(r => RolePermissions.Grants(r.Role, permission))
+            .Select(r => (r.IdentityId, r.Role.ToString()))
+            .Distinct()
+            .ToList();
+    }
 }

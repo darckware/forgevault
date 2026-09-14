@@ -83,8 +83,9 @@ public sealed class VaultTools
         var contextFields = new[] { ("taskId", taskId), ("onBehalfOfAgent", onBehalfOfAgent), ("runtimeSessionRef", runtimeSessionRef) };
 
         // Every attempt is audited, including denials — same invariant as the REST reveal
-        // endpoint (docs/modules/06_AUDIT_AND_GOVERNANCE.md §4 invariant 3).
-        if (!await permissions.HasPermissionAsync(actorId, Permission.SecretReadValue, scope, ct))
+        // endpoint (docs/modules/06_AUDIT_AND_GOVERNANCE.md §4 invariant 3). Access here is
+        // scope RBAC OR a narrower per-secret SecretAccessGrant, same as REST.
+        if (!await SecretAccessAuthorizer.CanReadValueAsync(db, permissions, actorId, secretId, scope, ct))
         {
             db.AuditLogs.Add(AuditLogFactory.Create(
                 actorId, actorType, "FAILED_ACCESS", "secret", secretId, requestId,
@@ -346,8 +347,8 @@ public sealed class VaultTools
     }
 
     [McpServerTool(Name = "admin.secret.revoke")]
-    [Description("Revokes a secret — no further read/write/reveal/rotate succeeds. Idempotent. Mirrors POST /api/v1/secrets/{id}/revoke.")]
-    public static async Task<SecretResponse> AdminSecretRevokeAsync(
+    [Description("Revokes a secret — no further read/write/reveal/rotate succeeds — and cascades to every SecretAccessGrant/McpServerAssignment referencing it (module 07). Idempotent. Mirrors POST /api/v1/secrets/{id}/revoke.")]
+    public static async Task<SecretRevokeResponse> AdminSecretRevokeAsync(
         Guid secretId,
         ForgeVaultDbContext db,
         IPermissionChecker permissions,
@@ -363,16 +364,130 @@ public sealed class VaultTools
 
         if (secret.Status is SecretStatus.Revoked)
         {
-            return SecretScopeResolver.ToMetadataResponse(secret);
+            return SecretEndpoints.ToRevokeResponse(secret, 0, 0);
         }
 
+        var now = DateTimeOffset.UtcNow;
         secret.Status = SecretStatus.Revoked;
-        secret.UpdatedAt = DateTimeOffset.UtcNow;
+        secret.UpdatedAt = now;
 
-        db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_REVOKE", "secret", secret.Id, NewRequestId()));
+        var revokedGrants = await db.SecretAccessGrants
+            .Where(g => g.SecretId == secretId && g.RevokedAt == null)
+            .ToListAsync(ct);
+        foreach (var grant in revokedGrants)
+        {
+            grant.RevokedAt = now;
+        }
+
+        var revokedAssignments = await SecretEndpoints.RevokeMcpAssignmentsReferencingSecretAsync(db, secretId, now, ct);
+
+        db.AuditLogs.Add(AuditLogFactory.Create(
+            actorId, user.GetActorType(), "SECRET_REVOKE", "secret", secret.Id, NewRequestId(),
+            $$"""{"revokedAccessGrants":{{revokedGrants.Count}},"revokedMcpAssignments":{{revokedAssignments}}}"""));
         await db.SaveChangesAsync(ct);
 
-        return SecretScopeResolver.ToMetadataResponse(secret);
+        return SecretEndpoints.ToRevokeResponse(secret, revokedGrants.Count, revokedAssignments);
+    }
+
+    [McpServerTool(Name = "admin.secret.impact")]
+    [Description("Lists who would be affected by rotating or revoking this secret: identities with a role granting SecretReadValue in its scope, active SecretAccessGrant identities, and active McpServerAssignment ids referencing it. RBAC gated by SecretWrite. Mirrors GET /api/v1/secrets/{id}/impact.")]
+    public static async Task<SecretImpactResponse> AdminSecretImpactAsync(
+        Guid secretId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var (_, scope) = await ResolveOrThrowAsync(db, secretId, ct);
+        if (!await permissions.HasPermissionAsync(user.GetUserId(), Permission.SecretWrite, scope, ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        var roleConsumers = await permissions.ListIdentitiesWithPermissionAsync(Permission.SecretReadValue, scope, ct);
+        var accessGrantIdentityIds = await db.SecretAccessGrants
+            .Where(g => g.SecretId == secretId && g.RevokedAt == null)
+            .Select(g => g.IdentityId)
+            .ToListAsync(ct);
+        var mcpAssignmentIds = await SecretEndpoints.FindMcpAssignmentIdsReferencingSecretAsync(db, secretId, ct);
+
+        return new SecretImpactResponse(
+            secretId,
+            roleConsumers.Select(r => new RoleConsumer(r.IdentityId, r.Role)).ToList(),
+            accessGrantIdentityIds,
+            mcpAssignmentIds);
+    }
+
+    [McpServerTool(Name = "admin.secret.grant_access")]
+    [Description("Grants a single identity (User or ServiceAccount) read access to exactly this secret, independent of any RoleAssignment scope — for handing an agent one credential (a site login, a database credential, a provider token) without also granting everything else in the Environment. RBAC gated by SecretWrite at the secret's scope. Idempotent. Mirrors POST /api/v1/secrets/{id}/access-grants.")]
+    public static async Task<object> AdminSecretGrantAccessAsync(
+        [Description("The secret's id")] Guid secretId,
+        [Description("Identity (User or ServiceAccount id) to grant read access to")] Guid identityId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var (_, scope) = await ResolveOrThrowAsync(db, secretId, ct);
+        var callerId = user.GetUserId();
+        if (!await permissions.HasPermissionAsync(callerId, Permission.SecretWrite, scope, ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        var existing = await db.SecretAccessGrants.SingleOrDefaultAsync(
+            g => g.SecretId == secretId && g.IdentityId == identityId && g.RevokedAt == null, ct);
+        if (existing is not null)
+        {
+            return ToSecretAccessGrantObject(existing);
+        }
+
+        var grant = new SecretAccessGrant
+        {
+            Id = Guid.NewGuid(),
+            SecretId = secretId,
+            IdentityId = identityId,
+            GrantedBy = callerId,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        db.SecretAccessGrants.Add(grant);
+        db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "SECRET_ACCESS_GRANTED", "secret_access_grant", grant.Id, NewRequestId()));
+        await db.SaveChangesAsync(ct);
+
+        return ToSecretAccessGrantObject(grant);
+    }
+
+    [McpServerTool(Name = "admin.secret.revoke_access")]
+    [Description("Revokes a SecretAccessGrant by id — the identity immediately loses that specific credential's access (any other RoleAssignment it holds is unaffected). Idempotent. Mirrors POST /api/v1/secret-access-grants/{id}/revoke.")]
+    public static async Task<object> AdminSecretRevokeAccessAsync(
+        Guid secretAccessGrantId,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var grant = await db.SecretAccessGrants.FindAsync([secretAccessGrantId], ct);
+        if (grant is null)
+        {
+            throw new McpException("secret_access_grant_not_found");
+        }
+
+        var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, grant.SecretId, ct);
+        var callerId = user.GetUserId();
+        if (resolved is null || !await permissions.HasPermissionAsync(callerId, Permission.SecretWrite, resolved.Value.Scope, ct))
+        {
+            throw new McpException("forbidden");
+        }
+
+        if (grant.RevokedAt is null)
+        {
+            grant.RevokedAt = DateTimeOffset.UtcNow;
+            db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "SECRET_ACCESS_REVOKED", "secret_access_grant", grant.Id, NewRequestId()));
+            await db.SaveChangesAsync(ct);
+        }
+
+        return ToSecretAccessGrantObject(grant);
     }
 
     [McpServerTool(Name = "admin.audit.search")]
@@ -630,6 +745,17 @@ public sealed class VaultTools
         status = assignment.RevokedAt is null ? "active" : "revoked",
         createdAt = assignment.CreatedAt,
         revokedAt = assignment.RevokedAt,
+    };
+
+    private static object ToSecretAccessGrantObject(SecretAccessGrant grant) => new
+    {
+        id = grant.Id,
+        secretId = grant.SecretId,
+        identityId = grant.IdentityId,
+        grantedBy = grant.GrantedBy,
+        status = grant.RevokedAt is null ? "active" : "revoked",
+        createdAt = grant.CreatedAt,
+        revokedAt = grant.RevokedAt,
     };
 
     [McpServerTool(Name = "admin.mcp.register")]

@@ -11,6 +11,7 @@ import { SecretDetailPage } from "@/pages/SecretDetailPage";
 import { ServiceAccountsPage } from "@/pages/ServiceAccountsPage";
 import { ServiceAccountDetailPage } from "@/pages/ServiceAccountDetailPage";
 import { AccessRolesPage } from "@/pages/AccessRolesPage";
+import { UsersPage } from "@/pages/UsersPage";
 import { McpServersPage } from "@/pages/McpServersPage";
 import { McpServerDetailPage } from "@/pages/McpServerDetailPage";
 import { McpAssignmentsPage } from "@/pages/McpAssignmentsPage";
@@ -38,6 +39,7 @@ export function App() {
         <Route path="/service-accounts" element={<ServiceAccountsPage />} />
         <Route path="/service-accounts/:saId" element={<ServiceAccountDetailPage />} />
         <Route path="/access" element={<AccessRolesPage />} />
+        <Route path="/users" element={<UsersPage />} />
         <Route path="/mcp-servers" element={<McpServersPage />} />
         <Route path="/mcp-servers/:id" element={<McpServerDetailPage />} />
         <Route path="/mcp-assignments" element={<McpAssignmentsPage />} />

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using ForgeVault.Api.Auditing;
 using ForgeVault.Api.Endpoints;
+using ForgeVault.Api.Observability;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Application.Security;
 using ForgeVault.Domain.Entities;
@@ -40,10 +41,16 @@ internal static class McpAssignmentRenderer
         string requestId,
         CancellationToken ct)
     {
+        McpRenderResult Result(McpRenderOutcome outcome, McpServerRenderResponse? response = null, string? detail = null)
+        {
+            McpMetrics.ServerRendersTotal.Add(1, new KeyValuePair<string, object?>("outcome", outcome.ToString()));
+            return new McpRenderResult(outcome, response, detail);
+        }
+
         var assignment = await db.McpServerAssignments.FindAsync([assignmentId], ct);
         if (assignment is null)
         {
-            return new McpRenderResult(McpRenderOutcome.AssignmentNotFound, null, null);
+            return Result(McpRenderOutcome.AssignmentNotFound);
         }
 
         // docs/modules/11_MCP_REGISTRY.md §12 gap, closed here: revoking an assignment must
@@ -56,13 +63,13 @@ internal static class McpAssignmentRenderer
                 callerId, callerType, "FAILED_ACCESS", "mcp_server_assignment", assignmentId, requestId,
                 """{"reason":"assignment_revoked","context":"mcp_render"}"""));
             await db.SaveChangesAsync(ct);
-            return new McpRenderResult(McpRenderOutcome.AssignmentRevoked, null, null);
+            return Result(McpRenderOutcome.AssignmentRevoked);
         }
 
         var definition = await db.McpServerDefinitions.FindAsync([assignment.McpServerDefinitionId], ct);
         if (definition is null)
         {
-            return new McpRenderResult(McpRenderOutcome.DefinitionNotFound, null, null);
+            return Result(McpRenderOutcome.DefinitionNotFound);
         }
 
         var isSelf = callerId == assignment.IdentityId;
@@ -86,7 +93,7 @@ internal static class McpAssignmentRenderer
             var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, secretId, ct);
             if (resolved is null)
             {
-                return new McpRenderResult(McpRenderOutcome.ReferencedSecretNotFound, null, secretId.ToString());
+                return Result(McpRenderOutcome.ReferencedSecretNotFound, detail: secretId.ToString());
             }
 
             var (secret, scope) = resolved.Value;
@@ -101,7 +108,7 @@ internal static class McpAssignmentRenderer
                     callerId, callerType, "FAILED_ACCESS", "secret", secretId, requestId,
                     """{"reason":"forbidden","context":"mcp_render"}"""));
                 await db.SaveChangesAsync(ct);
-                return new McpRenderResult(McpRenderOutcome.Forbidden, null, null);
+                return Result(McpRenderOutcome.Forbidden);
             }
 
             var currentVersion = await db.SecretVersions
@@ -138,6 +145,6 @@ internal static class McpAssignmentRenderer
             definition.Transport == McpTransportType.Http ? null : resolvedValues,
             definition.Transport == McpTransportType.Http ? resolvedValues : null);
 
-        return new McpRenderResult(McpRenderOutcome.Success, response, null);
+        return Result(McpRenderOutcome.Success, response);
     }
 }
