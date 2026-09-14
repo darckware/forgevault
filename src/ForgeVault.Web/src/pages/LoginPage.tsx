@@ -231,7 +231,9 @@ export function LoginPage() {
   };
 
   const onSubmitMfa = () => {
-    if ((RECAPTCHA_SITE_KEY && !recaptchaToken) || !pendingCredentials || otp.length !== OTP_LENGTH) {
+    // No reCAPTCHA gate here on purpose — the backend only checks it on the first,
+    // credentials-only request (AuthEndpoints.cs), not on this completion step.
+    if (!pendingCredentials || otp.length !== OTP_LENGTH) {
       return;
     }
     void attemptLogin(pendingCredentials, otp);
@@ -406,24 +408,12 @@ export function LoginPage() {
                   >
                     <OtpInput value={otp} onChange={setOtp} autoFocus />
 
-                    {RECAPTCHA_SITE_KEY && (
-                      <div className="flex justify-center">
-                        <ReCAPTCHA
-                          ref={recaptchaRef}
-                          sitekey={RECAPTCHA_SITE_KEY}
-                          theme="dark"
-                          onChange={(token) => setRecaptchaToken(token)}
-                          onExpired={() => setRecaptchaToken(null)}
-                        />
-                      </div>
-                    )}
-
                     {serverError && <p className="text-center text-xs text-vault-danger">{serverError}</p>}
 
                     <Button
                       type="submit"
                       isLoading={login.isPending}
-                      disabled={otp.length !== OTP_LENGTH || (Boolean(RECAPTCHA_SITE_KEY) && !recaptchaToken)}
+                      disabled={otp.length !== OTP_LENGTH}
                       className="mt-2 gap-2"
                     >
                       {login.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}

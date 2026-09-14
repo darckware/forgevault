@@ -14,7 +14,14 @@ public static class AuthEndpoints
 
         group.MapPost("/login", async (LoginRequest request, IAuthService authService, IRecaptchaVerifier recaptcha, CancellationToken ct) =>
         {
-            if (!await recaptcha.VerifyAsync(request.RecaptchaToken, ct))
+            // reCAPTCHA only gates the first factor (email+password) — a request that
+            // already carries an MfaCode is the LoginPage's second step, completing an
+            // attempt that already passed the check once. Requiring a second, freshly-solved
+            // token here (Google's tokens are single-use) was pure friction with no real
+            // bot-mitigation benefit: a script that already knows valid credentials plus a
+            // live TOTP code isn't the case reCAPTCHA is protecting against.
+            var isMfaCompletionStep = !string.IsNullOrWhiteSpace(request.MfaCode);
+            if (!isMfaCompletionStep && !await recaptcha.VerifyAsync(request.RecaptchaToken, ct))
             {
                 return Results.Json(new ErrorResponse("recaptcha_failed"), statusCode: StatusCodes.Status401Unauthorized);
             }
