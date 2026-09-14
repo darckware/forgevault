@@ -149,10 +149,15 @@ export function LoginPage() {
       recaptchaRef.current?.reset();
       setRecaptchaToken(null);
       if (err instanceof ApiError) {
-        // The API doesn't distinguish "wrong password" from "needs MFA" beyond a generic
-        // error code — once a plain attempt 401s, reveal the MFA field for a retry.
-        setNeedsMfa(true);
-        setServerError(err.body?.error ?? "Login failed");
+        // Only reveal the MFA field for the two error codes that actually mean "try again
+        // with a code" — every other 401 (recaptcha_failed, invalid_credentials,
+        // account_disabled) used to also flip this on, which showed a confusing "enter your
+        // MFA code" prompt to an account that never enabled MFA in the first place.
+        const code = err.body?.error;
+        if (code === "mfa_required" || code === "invalid_mfa_code") {
+          setNeedsMfa(true);
+        }
+        setServerError(code ?? "Login failed");
       }
     }
   };
