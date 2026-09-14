@@ -146,6 +146,8 @@ public static class AuthEndpoints
         user.Id.ToString(), user.Email, user.MfaEnabled, user.Username, user.FirstName, user.LastName, user.AvatarDataUrl, user.IsAdmin);
 }
 
+// Email is still the wire field name for backward compatibility, but its value is passed
+// straight through to LoginAsync(emailOrUsername, ...) — a User's Username works here too.
 public sealed record LoginRequest(string Email, string Password, string? MfaCode, string? RecaptchaToken = null);
 
 public sealed record RefreshRequest(string RefreshToken);

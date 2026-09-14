@@ -6,7 +6,7 @@ import { z } from "zod";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import ReCAPTCHA from "react-google-recaptcha";
-import { ArrowLeft, Eye, EyeOff, KeyRound, Loader2, Lock, ScrollText, ShieldCheck, Users } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, KeyRound, Lock, ScrollText, ShieldCheck, Users } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { ApiError } from "@/lib/api";
@@ -14,7 +14,9 @@ import { useLogin } from "@/hooks/useAuth";
 import { getRememberMe, setRememberMe } from "@/stores/authStore";
 
 const credentialsSchema = z.object({
-  email: z.string().email(),
+  // No .email() format check — the backend accepts a User's Username (M15) here too
+  // (AuthService.LoginAsync), so any non-empty identifier is valid at this layer.
+  email: z.string().min(1, "Required"),
   password: z.string().min(1, "Required"),
 });
 type CredentialsValues = z.infer<typeof credentialsSchema>;
@@ -321,30 +323,33 @@ export function LoginPage() {
                   </div>
 
                   <form onSubmit={handleSubmit(onSubmitCredentials)} className="flex flex-col gap-4">
-                    <div className="relative">
-                      <Users className="pointer-events-none absolute left-3 top-[34px] h-4 w-4 -translate-y-1/2 text-slate-500" />
-                      <Input label="Email" type="email" className="pl-9" {...register("email")} error={errors.email?.message} />
-                    </div>
+                    <Input
+                      label="Email ou usuário"
+                      type="text"
+                      autoComplete="username"
+                      leadingIcon={<Users className="h-4 w-4" />}
+                      {...register("email")}
+                      error={errors.email?.message}
+                    />
 
-                    <div className="relative">
-                      <KeyRound className="pointer-events-none absolute left-3 top-[34px] h-4 w-4 -translate-y-1/2 text-slate-500" />
-                      <Input
-                        label="Password"
-                        type={showPassword ? "text" : "password"}
-                        className="pl-9 pr-9"
-                        {...register("password")}
-                        error={errors.password?.message}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((s) => !s)}
-                        className="absolute right-2.5 top-[34px] -translate-y-1/2 text-slate-500 hover:text-slate-200"
-                        tabIndex={-1}
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
+                    <Input
+                      label="Password"
+                      type={showPassword ? "text" : "password"}
+                      leadingIcon={<KeyRound className="h-4 w-4" />}
+                      trailingElement={
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((s) => !s)}
+                          className="text-slate-500 hover:text-slate-200"
+                          tabIndex={-1}
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      }
+                      {...register("password")}
+                      error={errors.password?.message}
+                    />
 
                     <label className="flex items-center gap-2 text-sm text-slate-400 select-none">
                       <input
@@ -376,7 +381,7 @@ export function LoginPage() {
                       disabled={Boolean(RECAPTCHA_SITE_KEY) && !recaptchaToken}
                       className="mt-2 gap-2"
                     >
-                      {login.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                      <ShieldCheck className="h-4 w-4" />
                       Entrar
                     </Button>
                   </form>
@@ -416,7 +421,7 @@ export function LoginPage() {
                       disabled={otp.length !== OTP_LENGTH}
                       className="mt-2 gap-2"
                     >
-                      {login.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                      <ShieldCheck className="h-4 w-4" />
                       Verificar
                     </Button>
                   </form>

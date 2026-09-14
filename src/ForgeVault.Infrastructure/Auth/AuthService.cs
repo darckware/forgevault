@@ -23,9 +23,14 @@ public sealed class AuthService(
     IOptions<JwtOptions> jwtOptions,
     ILogger<AuthService> logger) : IAuthService
 {
-    public async Task<AuthOutcome> LoginAsync(string email, string password, string? mfaCode, CancellationToken ct)
+    // The parameter is still called "email" on the wire (LoginRequest.Email,
+    // AuthEndpoints.cs) for backward compatibility with every existing caller, but a User's
+    // Username (M15, nullable/unique-when-set) is accepted here too — whichever the caller
+    // typed. Username rows are never NULL-equal to a non-null identifier, so this can't
+    // accidentally match every unenrolled account.
+    public async Task<AuthOutcome> LoginAsync(string emailOrUsername, string password, string? mfaCode, CancellationToken ct)
     {
-        var user = await db.Users.SingleOrDefaultAsync(u => u.Email == email, ct);
+        var user = await db.Users.SingleOrDefaultAsync(u => u.Email == emailOrUsername || u.Username == emailOrUsername, ct);
 
         // Same failure reason regardless of whether the email exists or the password is
         // wrong — never let a caller distinguish "no such user" from "wrong password".

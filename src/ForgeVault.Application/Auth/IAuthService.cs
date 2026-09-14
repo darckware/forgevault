@@ -5,8 +5,9 @@ public interface IAuthService
 {
     // mfaCode is required and validated only when the account has MfaEnabled=true
     // (docs/architecture/IMPLEMENTATION_READINESS.md §4 / M6) — accounts that never
-    // enrolled are unaffected.
-    Task<AuthOutcome> LoginAsync(string email, string password, string? mfaCode, CancellationToken ct);
+    // enrolled are unaffected. emailOrUsername accepts either identifier (M17) — a User's
+    // Username (M15) is optional, so email always works even for accounts with none set.
+    Task<AuthOutcome> LoginAsync(string emailOrUsername, string password, string? mfaCode, CancellationToken ct);
 
     Task<AuthOutcome> RefreshAsync(string refreshToken, CancellationToken ct);
 

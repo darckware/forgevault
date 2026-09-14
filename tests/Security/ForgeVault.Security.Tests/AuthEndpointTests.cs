@@ -106,6 +106,41 @@ public sealed class AuthEndpointTests(LoggingWebApplicationFactory factory) : IC
         Assert.True(afterFlip!.MfaEnabled);
     }
 
+    [Fact]
+    public async Task Login_AcceptsUsername_AsWellAsEmail()
+    {
+        var email = $"user-{Guid.NewGuid():N}@example.test";
+        var username = $"u{Guid.NewGuid():N}"[..12];
+        const string password = "CorrectHorseBatteryStaple1!";
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+            var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+            var now = DateTimeOffset.UtcNow;
+
+            db.Users.Add(new User
+            {
+                Id = Guid.NewGuid(),
+                Email = email,
+                Username = username,
+                PasswordHash = hasher.Hash(password),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var byEmail = await factory.CreateClient().PostAsJsonAsync("/api/v1/auth/login", new { email, password });
+        Assert.Equal(HttpStatusCode.OK, byEmail.StatusCode);
+
+        var byUsername = await factory.CreateClient().PostAsJsonAsync("/api/v1/auth/login", new { email = username, password });
+        Assert.Equal(HttpStatusCode.OK, byUsername.StatusCode);
+
+        var wrongUsername = await factory.CreateClient().PostAsJsonAsync("/api/v1/auth/login", new { email = "no-such-username", password });
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongUsername.StatusCode);
+    }
+
     private async Task<(HttpClient Client, string Email)> CreateAuthenticatedClientAsync(string password)
     {
         var email = $"user-{Guid.NewGuid():N}@example.test";
