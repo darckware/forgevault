@@ -1,15 +1,41 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { KeyRound, Loader2, LogOut, ShieldCheck, User as UserIcon } from "lucide-react";
+import { Camera, KeyRound, Loader2, LogOut, ShieldCheck, User as UserIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useClickOutside } from "@/hooks/useClickOutside";
-import { useChangeMyPassword, useLogout, useMe, useMfaEnroll, useMfaVerify } from "@/hooks/useAuth";
+import { useChangeMyPassword, useLogout, useMe, useMfaEnroll, useMfaVerify, useUpdateMe } from "@/hooks/useAuth";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { MonoId } from "@/components/ui/MonoId";
 import { ApiError } from "@/lib/api";
+import type { MeResponse } from "@/types/api";
+
+const MAX_AVATAR_BYTES = 2_000_000;
+
+function displayName(me: MeResponse): string {
+  const full = [me.firstName, me.lastName].filter(Boolean).join(" ");
+  return full.length > 0 ? full : me.email;
+}
+
+// Shared between the sidebar trigger and the account modal — an uploaded photo, or the
+// first letter of the display name as a fallback, same convention as ForgeHub's avatar.
+function UserAvatar({ me, className }: { me: MeResponse; className: string }) {
+  if (me.avatarDataUrl) {
+    return <img src={me.avatarDataUrl} alt="" className={cn(className, "rounded-full object-cover")} />;
+  }
+  return (
+    <span
+      className={cn(
+        className,
+        "flex items-center justify-center rounded-full bg-vault-accent-dark/30 font-bold uppercase text-vault-accent-bright",
+      )}
+    >
+      {displayName(me)[0]}
+    </span>
+  );
+}
 
 function AccountModal({ onClose }: { onClose: () => void }) {
   const { data: me } = useMe();
@@ -18,6 +44,13 @@ function AccountModal({ onClose }: { onClose: () => void }) {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const enroll = useMfaEnroll();
   const verify = useMfaVerify();
+  const updateMe = useUpdateMe();
+
+  const [firstName, setFirstName] = useState(me?.firstName ?? "");
+  const [lastName, setLastName] = useState(me?.lastName ?? "");
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleVerify = async () => {
     setVerifyError(null);
@@ -29,17 +62,83 @@ function AccountModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const handleAvatarPick = (file: File) => {
+    setProfileError(null);
+    if (file.size > MAX_AVATAR_BYTES) {
+      setProfileError("Image too large (max ~1.5MB).");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => updateMe.mutate({ avatarDataUrl: reader.result as string });
+    reader.onerror = () => setProfileError("Failed to read the image file.");
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveName = async () => {
+    setProfileError(null);
+    setProfileSaved(false);
+    try {
+      await updateMe.mutateAsync({ firstName: firstName.trim(), lastName: lastName.trim() });
+      setProfileSaved(true);
+    } catch {
+      setProfileError("Failed to save your name.");
+    }
+  };
+
   return (
     <Modal open onClose={onClose} title="Perfil da conta">
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-vault-accent-dark/30 text-lg font-bold uppercase text-vault-accent-bright">
-            {me?.email[0]}
-          </span>
+          <div className="relative">
+            {me && <UserAvatar me={me} className="h-12 w-12 shrink-0 text-lg" />}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-vault-surface-border bg-vault-bg text-slate-300 hover:text-vault-accent-bright"
+              aria-label="Change profile photo"
+            >
+              <Camera className="h-3 w-3" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  handleAvatarPick(file);
+                }
+                e.target.value = "";
+              }}
+            />
+          </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-100">{me?.email}</p>
+            <p className="truncate text-sm font-medium text-slate-100">
+              {me && displayName(me)}
+              {me?.isAdmin && (
+                <span className="ml-2 inline-block align-middle">
+                  <Badge tone="success">Admin</Badge>
+                </span>
+              )}
+            </p>
+            <p className="truncate text-xs text-slate-500">{me?.email}</p>
             {me && <MonoId label="ID" value={me.id} />}
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-md border border-vault-surface-border bg-vault-surface-dim/40 p-3">
+          <div className="flex gap-2">
+            <Input label="Nome" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <Input label="Sobrenome" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+          </div>
+          {me?.username && <p className="text-xs text-slate-500">Username: {me.username}</p>}
+          {profileError && <p className="text-xs text-vault-danger">{profileError}</p>}
+          {profileSaved && <p className="text-xs text-vault-accent-bright">Salvo.</p>}
+          <Button size="sm" className="w-fit" isLoading={updateMe.isPending} onClick={handleSaveName}>
+            Salvar nome
+          </Button>
         </div>
 
         <div className="rounded-md border border-vault-surface-border bg-vault-surface-dim/40 p-3">
@@ -200,10 +299,13 @@ export function UserMenu() {
             open && "bg-vault-surface-dim/60",
           )}
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-vault-accent-dark/30 text-xs font-bold uppercase text-vault-accent-bright">
-            {me.email[0]}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-xs text-slate-300">{me.email}</span>
+          <UserAvatar me={me} className="h-7 w-7 shrink-0 text-xs" />
+          <span className="min-w-0 flex-1 truncate text-xs text-slate-300">{displayName(me)}</span>
+          {me.isAdmin && (
+            <span className="shrink-0">
+              <Badge tone="success">Admin</Badge>
+            </span>
+          )}
         </button>
 
         {open && (

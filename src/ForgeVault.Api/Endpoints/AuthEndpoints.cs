@@ -1,7 +1,8 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using ForgeVault.Api;
 using ForgeVault.Application.Auth;
+using ForgeVault.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace ForgeVault.Api.Endpoints;
 
@@ -28,16 +29,61 @@ public static class AuthEndpoints
             return ToHttpResult(outcome);
         });
 
-        // Placeholder authenticated endpoint (docs/architecture/IMPLEMENTATION_READINESS.md,
-        // M3 "done when": an authenticated call succeeds, an unauthenticated one gets 401).
-        group.MapGet("/me", (ClaimsPrincipal user) =>
+        // M15: now backed by a DB read instead of pure JWT claims — Username/FirstName/
+        // LastName/AvatarDataUrl/IsAdmin don't exist on the token (an avatar data URL in
+        // particular has no business being carried around in every request's Authorization
+        // header), so the claim-only shortcut this endpoint used before no longer covers the
+        // full profile.
+        group.MapGet("/me", async (ForgeVaultDbContext db, ClaimsPrincipal user, CancellationToken ct) =>
         {
-            var id = user.FindFirstValue(JwtRegisteredClaimNames.Sub);
-            var email = user.FindFirstValue(JwtRegisteredClaimNames.Email);
-            // mfa_enabled is already on the access token (AuthService.CreateAccessToken) —
-            // reading it from the claim avoids a DB round-trip for what's just profile display.
-            var mfaEnabled = user.FindFirstValue("mfa_enabled") == "true";
-            return Results.Ok(new MeResponse(id!, email!, mfaEnabled));
+            var entity = await db.Users.FindAsync([user.GetUserId()], ct);
+            return entity is null ? Results.NotFound() : Results.Ok(ToMeResponse(entity));
+        }).RequireAuthorization();
+
+        // Self-service profile edit — deliberately excludes Username/Email/IsAdmin/IsActive/
+        // password, same boundary ForgeHub's SelfUserUpdate draws (those stay behind
+        // UserManage on the admin-only PATCH /api/v1/users/{id}). No permission beyond being
+        // authenticated: every identity may edit its own display name/avatar.
+        group.MapPut("/me", async (UpdateMeRequest request, ForgeVaultDbContext db, ClaimsPrincipal user, CancellationToken ct) =>
+        {
+            if (request.AvatarDataUrl is { Length: > 0 } avatar)
+            {
+                if (avatar.Length > 2_000_000)
+                {
+                    return Results.Json(new ErrorResponse("avatar_too_large"), statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                if (!avatar.StartsWith("data:image/", StringComparison.Ordinal))
+                {
+                    return Results.Json(new ErrorResponse("avatar_must_be_a_data_url"), statusCode: StatusCodes.Status400BadRequest);
+                }
+            }
+
+            var entity = await db.Users.FindAsync([user.GetUserId()], ct);
+            if (entity is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (request.FirstName is not null)
+            {
+                entity.FirstName = request.FirstName.Length == 0 ? null : request.FirstName;
+            }
+
+            if (request.LastName is not null)
+            {
+                entity.LastName = request.LastName.Length == 0 ? null : request.LastName;
+            }
+
+            if (request.AvatarDataUrl is not null)
+            {
+                entity.AvatarDataUrl = request.AvatarDataUrl.Length == 0 ? null : request.AvatarDataUrl;
+            }
+
+            entity.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToMeResponse(entity));
         }).RequireAuthorization();
 
         group.MapPost("/change-password", async (ChangePasswordRequest request, IAuthService authService, ClaimsPrincipal user, CancellationToken ct) =>
@@ -78,6 +124,9 @@ public static class AuthEndpoints
         AuthFailure failure => Results.Json(new ErrorResponse(failure.Reason), statusCode: StatusCodes.Status401Unauthorized),
         _ => Results.Problem(),
     };
+
+    private static MeResponse ToMeResponse(ForgeVault.Domain.Entities.User user) => new(
+        user.Id.ToString(), user.Email, user.MfaEnabled, user.Username, user.FirstName, user.LastName, user.AvatarDataUrl, user.IsAdmin);
 }
 
 public sealed record LoginRequest(string Email, string Password, string? MfaCode, string? RecaptchaToken = null);
@@ -92,7 +141,11 @@ public sealed record LoginResponse(string AccessToken, string RefreshToken, Date
 
 public sealed record ErrorResponse(string Error);
 
-public sealed record MeResponse(string Id, string Email, bool MfaEnabled);
+public sealed record MeResponse(
+    string Id, string Email, bool MfaEnabled,
+    string? Username, string? FirstName, string? LastName, string? AvatarDataUrl, bool IsAdmin);
+
+public sealed record UpdateMeRequest(string? FirstName, string? LastName, string? AvatarDataUrl);
 
 public sealed record MfaEnrollResponse(string Base32Secret, string OtpAuthUri);
 

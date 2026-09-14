@@ -61,6 +61,11 @@ export interface MeResponse {
   id: string;
   email: string;
   mfaEnabled: boolean;
+  username: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  avatarDataUrl: string | null;
+  isAdmin: boolean;
 }
 
 export interface MfaEnrollResponse {
@@ -190,12 +195,17 @@ export interface RoleAssignmentResponse {
   revokedAt: string | null;
 }
 
-// --- Users (M13 admin) ---
+// --- Users (M13 admin, M15 profile fields) ---
 export interface UserResponse {
   id: string;
   email: string;
   mfaEnabled: boolean;
   isActive: boolean;
+  username: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  avatarDataUrl: string | null;
+  isAdmin: boolean;
   createdAt: string;
 }
 

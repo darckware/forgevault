@@ -97,11 +97,13 @@ public sealed class AuthEndpointTests(LoggingWebApplicationFactory factory) : IC
             await db.SaveChangesAsync();
         }
 
-        // mfa_enabled is read from the access token's own claim, not a fresh DB lookup, so a
-        // flip on the row alone shouldn't retroactively change what an already-issued token
-        // reports — confirms the claim is what /me actually reads, not the row.
-        var stillOld = await client.GetFromJsonAsync<MeDto>("/api/v1/auth/me");
-        Assert.False(stillOld!.MfaEnabled);
+        // M15: /me switched from a pure JWT-claim read to a DB read (Username/FirstName/
+        // LastName/AvatarDataUrl/IsAdmin don't exist on the token, so the endpoint needs a
+        // row anyway) — mfa_enabled now comes from that same row for consistency, rather
+        // than half the response being live and half stuck at token-issue time. A flip on
+        // the row is now reflected immediately, without needing a fresh login.
+        var afterFlip = await client.GetFromJsonAsync<MeDto>("/api/v1/auth/me");
+        Assert.True(afterFlip!.MfaEnabled);
     }
 
     private async Task<(HttpClient Client, string Email)> CreateAuthenticatedClientAsync(string password)

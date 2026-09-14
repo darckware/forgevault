@@ -74,6 +74,15 @@ export function useMfaVerify() {
   });
 }
 
+export function useUpdateMe() {
+  const setUser = useAuthStore((s) => s.setUser);
+  return useMutation({
+    mutationFn: (payload: { firstName?: string | null; lastName?: string | null; avatarDataUrl?: string | null }) =>
+      apiFetch<MeResponse>("/api/v1/auth/me", { method: "PUT", body: JSON.stringify(payload) }),
+    onSuccess: (me) => setUser(me),
+  });
+}
+
 export function useChangeMyPassword() {
   return useMutation({
     mutationFn: (payload: { currentPassword: string; newPassword: string }) =>

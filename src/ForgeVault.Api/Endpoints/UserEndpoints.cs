@@ -44,12 +44,20 @@ public static class UserEndpoints
                 return Results.Conflict(new ErrorResponse("email_taken"));
             }
 
+            if (request.Username is { Length: > 0 } && await db.Users.AnyAsync(u => u.Username == request.Username, ct))
+            {
+                return Results.Conflict(new ErrorResponse("username_taken"));
+            }
+
             var now = DateTimeOffset.UtcNow;
             var newUser = new User
             {
                 Id = Guid.NewGuid(),
                 Email = request.Email,
                 PasswordHash = passwordHasher.Hash(request.Password),
+                Username = request.Username is { Length: > 0 } ? request.Username : null,
+                FirstName = request.FirstName is { Length: > 0 } ? request.FirstName : null,
+                LastName = request.LastName is { Length: > 0 } ? request.LastName : null,
                 IsActive = true,
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -81,6 +89,65 @@ public static class UserEndpoints
         group.MapPost("/{id:guid}/reactivate", async (
             Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
             await SetActiveAsync(id, isActive: true, "USER_REACTIVATED", db, permissions, user, http, ct));
+
+        // Admin-side profile edit — Username/IsAdmin specifically stay out of
+        // PUT /api/v1/auth/me (self-service) on purpose, same boundary ForgeHub draws
+        // between SelfUserUpdate and its admin-only /users/{id} route. IsAdmin here is the
+        // cosmetic badge only (see User.IsAdmin) — never a Permission bypass.
+        group.MapPatch("/{id:guid}", async (
+            Guid id,
+            UpdateUserRequest request,
+            ForgeVaultDbContext db,
+            IPermissionChecker permissions,
+            ClaimsPrincipal user,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            var callerId = user.GetUserId();
+            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
+            {
+                return Results.Forbid();
+            }
+
+            var target = await db.Users.FindAsync([id], ct);
+            if (target is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (request.Username is not null)
+            {
+                var normalized = request.Username.Length == 0 ? null : request.Username;
+                if (normalized is not null && await db.Users.AnyAsync(u => u.Id != id && u.Username == normalized, ct))
+                {
+                    return Results.Conflict(new ErrorResponse("username_taken"));
+                }
+
+                target.Username = normalized;
+            }
+
+            if (request.FirstName is not null)
+            {
+                target.FirstName = request.FirstName.Length == 0 ? null : request.FirstName;
+            }
+
+            if (request.LastName is not null)
+            {
+                target.LastName = request.LastName.Length == 0 ? null : request.LastName;
+            }
+
+            if (request.IsAdmin is { } isAdmin && target.IsAdmin != isAdmin)
+            {
+                target.IsAdmin = isAdmin;
+                db.AuditLogs.Add(AuditLogFactory.Create(
+                    callerId, user.GetActorType(), isAdmin ? "USER_ADMIN_BADGE_GRANTED" : "USER_ADMIN_BADGE_REVOKED", "user", target.Id, http.TraceIdentifier));
+            }
+
+            target.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(target));
+        });
     }
 
     private static async Task<IResult> SetActiveAsync(
@@ -120,9 +187,16 @@ public static class UserEndpoints
     }
 
     private static UserResponse ToResponse(User user) => new(
-        user.Id, user.Email, user.MfaEnabled, user.IsActive, user.CreatedAt);
+        user.Id, user.Email, user.MfaEnabled, user.IsActive,
+        user.Username, user.FirstName, user.LastName, user.AvatarDataUrl, user.IsAdmin,
+        user.CreatedAt);
 }
 
-public sealed record CreateUserRequest(string Email, string Password);
+public sealed record CreateUserRequest(string Email, string Password, string? Username = null, string? FirstName = null, string? LastName = null);
 
-public sealed record UserResponse(Guid Id, string Email, bool MfaEnabled, bool IsActive, DateTimeOffset CreatedAt);
+public sealed record UpdateUserRequest(string? Username, string? FirstName, string? LastName, bool? IsAdmin);
+
+public sealed record UserResponse(
+    Guid Id, string Email, bool MfaEnabled, bool IsActive,
+    string? Username, string? FirstName, string? LastName, string? AvatarDataUrl, bool IsAdmin,
+    DateTimeOffset CreatedAt);
