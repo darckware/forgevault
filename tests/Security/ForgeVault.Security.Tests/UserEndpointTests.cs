@@ -89,6 +89,31 @@ public sealed class UserEndpointTests(LoggingWebApplicationFactory factory) : IC
     }
 
     [Fact]
+    public async Task Delete_RemovesUserAndRevokesRoleAssignments_CannotDeleteSelf_RequiresUserManage()
+    {
+        var (owner, ownerId) = await CreateAuthenticatedClientAsync();
+        var (stranger, _) = await CreateAuthenticatedClientAsync();
+        var (_, targetId) = await CreateAuthenticatedClientAsync();
+        var organizationId = await GrantOwnerAtNewOrganizationAsync(owner, ownerId);
+        await GrantRoleAsync(targetId, Role.Developer, organizationId);
+
+        var selfDeleteResponse = await owner.DeleteAsync($"/api/v1/users/{ownerId}");
+        Assert.Equal(HttpStatusCode.Conflict, selfDeleteResponse.StatusCode);
+
+        var deniedResponse = await stranger.DeleteAsync($"/api/v1/users/{targetId}");
+        Assert.Equal(HttpStatusCode.Forbidden, deniedResponse.StatusCode);
+
+        var deleteResponse = await owner.DeleteAsync($"/api/v1/users/{targetId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        Assert.False(await db.Users.AnyAsync(u => u.Id == targetId));
+        var assignment = await db.RoleAssignments.SingleAsync(r => r.IdentityId == targetId);
+        Assert.NotNull(assignment.RevokedAt);
+    }
+
+    [Fact]
     public async Task List_RequiresUserManage()
     {
         var (owner, ownerId) = await CreateAuthenticatedClientAsync();
@@ -102,7 +127,7 @@ public sealed class UserEndpointTests(LoggingWebApplicationFactory factory) : IC
         Assert.Equal(HttpStatusCode.OK, allowedResponse.StatusCode);
     }
 
-    private async Task GrantOwnerAtNewOrganizationAsync(HttpClient owner, Guid ownerId)
+    private async Task<Guid> GrantOwnerAtNewOrganizationAsync(HttpClient owner, Guid ownerId)
     {
         var orgResponse = await owner.PostAsJsonAsync("/api/v1/organizations", new
         {
@@ -110,16 +135,21 @@ public sealed class UserEndpointTests(LoggingWebApplicationFactory factory) : IC
             slug = $"acme-{Guid.NewGuid():N}",
         });
         var organization = await orgResponse.Content.ReadFromJsonAsync<IdResponse>();
+        await GrantRoleAsync(ownerId, Role.Owner, organization!.Id);
+        return organization.Id;
+    }
 
+    private async Task GrantRoleAsync(Guid identityId, Role role, Guid organizationId)
+    {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
         db.RoleAssignments.Add(new RoleAssignment
         {
             Id = Guid.NewGuid(),
-            IdentityId = ownerId,
-            Role = Role.Owner,
+            IdentityId = identityId,
+            Role = role,
             ScopeType = RoleScopeType.Organization,
-            ScopeId = organization!.Id,
+            ScopeId = organizationId,
             CreatedAt = DateTimeOffset.UtcNow,
         });
         await db.SaveChangesAsync();

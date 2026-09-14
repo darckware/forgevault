@@ -148,6 +148,56 @@ public static class UserEndpoints
 
             return Results.Ok(ToResponse(target));
         });
+
+        // Hard delete — the CRUD verb deactivate/reactivate never covered (those keep the
+        // row, audit trail and RoleAssignments intact; this actually removes the identity).
+        // Meant for cleaning up an account that should never have existed (a mistaken
+        // invite, leftover test data), not routine offboarding — deactivate is the
+        // reversible, audit-preserving choice for that.
+        group.MapDelete("/{id:guid}", async (
+            Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
+        {
+            var callerId = user.GetUserId();
+            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
+            {
+                return Results.Forbid();
+            }
+
+            var target = await db.Users.FindAsync([id], ct);
+            if (target is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (id == callerId)
+            {
+                // Same "don't let an actor strand itself" principle as deactivate — deleting
+                // your own account here would leave a caller mid-request with no way back.
+                return Results.Json(new ErrorResponse("cannot_delete_self"), statusCode: StatusCodes.Status409Conflict);
+            }
+
+            // RoleAssignment.IdentityId is a soft reference (module 04 — no FK to any
+            // identity table, since an identity can be a User or a ServiceAccount). Deleting
+            // the User row wouldn't fail without this, but would leave live-looking
+            // RoleAssignment rows pointing at an identity that no longer exists — revoke them
+            // explicitly first, same audited action a real RoleAssignmentEndpoints revoke
+            // would produce, not silent orphaning.
+            var activeAssignments = await db.RoleAssignments
+                .Where(r => r.IdentityId == id && r.RevokedAt == null)
+                .ToListAsync(ct);
+            var now = DateTimeOffset.UtcNow;
+            foreach (var assignment in activeAssignments)
+            {
+                assignment.RevokedAt = now;
+                db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "ACCESS_REVOKED", "role_assignment", assignment.Id, http.TraceIdentifier));
+            }
+
+            db.Users.Remove(target);
+            db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), "USER_DELETED", "user", target.Id, http.TraceIdentifier));
+            await db.SaveChangesAsync(ct);
+
+            return Results.NoContent();
+        });
     }
 
     private static async Task<IResult> SetActiveAsync(

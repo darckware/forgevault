@@ -13,7 +13,7 @@ import { MonoId } from "@/components/ui/MonoId";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatDateTime } from "@/lib/format";
-import { useCreateUser, useSetUserActive, useUpdateUser, useUsers } from "@/hooks/useUsers";
+import { useCreateUser, useDeleteUser, useSetUserActive, useUpdateUser, useUsers } from "@/hooks/useUsers";
 import { useMe } from "@/hooks/useAuth";
 import { ApiError } from "@/lib/api";
 import type { UserResponse } from "@/types/api";
@@ -33,8 +33,16 @@ export function UsersPage() {
   const createUser = useCreateUser();
   const setActive = useSetUserActive();
   const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
   const [modalOpen, setModalOpen] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const onDelete = (u: UserResponse) => {
+    const label = [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email;
+    if (confirm(`Permanently delete "${label}"? This cannot be undone — use Deactivate instead if you just want to revoke access.`)) {
+      deleteUser.mutate(u.id);
+    }
+  };
 
   const {
     register,
@@ -109,14 +117,19 @@ export function UsersPage() {
                     {u.isAdmin ? "Remove admin badge" : "Grant admin badge"}
                   </Button>
                   {u.id !== me?.id && (
-                    <Button
-                      size="sm"
-                      variant={u.isActive ? "danger" : "secondary"}
-                      isLoading={setActive.isPending}
-                      onClick={() => setActive.mutate({ id: u.id, active: !u.isActive })}
-                    >
-                      {u.isActive ? "Deactivate" : "Reactivate"}
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant={u.isActive ? "danger" : "secondary"}
+                        isLoading={setActive.isPending}
+                        onClick={() => setActive.mutate({ id: u.id, active: !u.isActive })}
+                      >
+                        {u.isActive ? "Deactivate" : "Reactivate"}
+                      </Button>
+                      <Button size="sm" variant="danger" isLoading={deleteUser.isPending} onClick={() => onDelete(u)}>
+                        Delete
+                      </Button>
+                    </>
                   )}
                 </div>
               ),

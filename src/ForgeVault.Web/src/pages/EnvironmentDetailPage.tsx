@@ -13,6 +13,7 @@ import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { SecretStatusBadge } from "@/components/secrets/SecretStatusBadge";
 import { SecretForm, type SecretFormValues } from "@/components/secrets/SecretForm";
 import { environmentKindTone } from "@/lib/format";
+import { SECRET_TYPE_LABELS } from "@/lib/secretValue";
 import { useEnvironment } from "@/hooks/useEnvironments";
 import { useCreateSecret, useSecrets } from "@/hooks/useSecrets";
 import { ApiError } from "@/lib/api";
@@ -81,7 +82,7 @@ export function EnvironmentDetailPage() {
             onRowClick={(s) => navigate(`/secrets/${s.id}`)}
             columns={[
               { key: "name", header: "Name", render: (s) => <MonoId value={s.name} truncate={false} copyable={false} /> },
-              { key: "type", header: "Type" },
+              { key: "type", header: "Type", render: (s) => SECRET_TYPE_LABELS[s.type] },
               { key: "status", header: "Status", render: (s) => <SecretStatusBadge status={s.status} /> },
               { key: "currentVersion", header: "Version", render: (s) => `#${s.currentVersion}` },
             ]}

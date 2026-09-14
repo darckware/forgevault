@@ -51,6 +51,29 @@ export function decodeStructuredValue(_type: StructuredSecretType, raw: string):
   }
 }
 
+// Human-readable labels for the Type dropdown (SecretForm) — the raw enum names
+// (esp. "Password" and "DatabaseCredential") don't read as "site login credential" or
+// "database credential" on their own, which made the structured form above easy to miss.
+export const SECRET_TYPE_LABELS: Record<SecretType, string> = {
+  Password: "Password (site login)",
+  ApiKey: "API Key",
+  AccessToken: "Access Token",
+  RefreshToken: "Refresh Token",
+  LlmToken: "LLM Token",
+  SshPrivateKey: "SSH Private Key",
+  SshPassword: "SSH Password",
+  DatabaseCredential: "Database Credential",
+  OAuthClient: "OAuth Client",
+  Certificate: "Certificate",
+  PrivateKey: "Private Key",
+  ServiceAccount: "Service Account Credential",
+  WebhookSecret: "Webhook Secret",
+  EnvSecret: "Env Secret",
+  TotpSeed: "TOTP Seed",
+  SystemCredential: "System Credential",
+  GenericSecret: "Generic Secret",
+};
+
 export const STRUCTURED_FIELD_DEFS: Record<StructuredSecretType, { key: keyof SiteLoginFields | keyof DatabaseCredentialFields; label: string; placeholder?: string; sensitive?: boolean }[]> = {
   Password: [
     { key: "url", label: "Site URL", placeholder: "https://example.com/login" },

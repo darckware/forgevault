@@ -6,7 +6,7 @@ import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { SECRET_TYPES } from "@/types/api";
 import type { SecretType } from "@/types/api";
-import { STRUCTURED_FIELD_DEFS, encodeStructuredValue, isStructuredSecretType } from "@/lib/secretValue";
+import { SECRET_TYPE_LABELS, STRUCTURED_FIELD_DEFS, encodeStructuredValue, isStructuredSecretType } from "@/lib/secretValue";
 
 const schema = z.object({
   name: z.string().min(1, "Required"),
@@ -70,7 +70,7 @@ export function SecretForm({ onSubmit, isSubmitting, submitLabel = "Create secre
       <Input label="Name" placeholder="OPENAI_API_KEY" {...register("name")} error={errors.name?.message} />
       <Select
         label="Type"
-        options={SECRET_TYPES.map((t) => ({ value: t, label: t }))}
+        options={SECRET_TYPES.map((t) => ({ value: t, label: SECRET_TYPE_LABELS[t] }))}
         {...register("type")}
         error={errors.type?.message}
       />

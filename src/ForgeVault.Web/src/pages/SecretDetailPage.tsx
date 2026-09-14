@@ -21,6 +21,7 @@ import { useEnvironment } from "@/hooks/useEnvironments";
 import { useRevokeSecret, useRotateSecret, useSecret, useUpdateSecret } from "@/hooks/useSecrets";
 import { useGrantSecretAccess, useRevokeSecretAccessGrant, useSecretAccessGrants } from "@/hooks/useSecretAccessGrants";
 import { ApiError } from "@/lib/api";
+import { SECRET_TYPE_LABELS } from "@/lib/secretValue";
 import type { SecretAccessGrantResponse } from "@/types/api";
 
 interface ValueFormValues {
@@ -112,7 +113,7 @@ export function SecretDetailPage() {
           <div>
             <h1 className="font-mono text-lg text-vault-accent-bright">{secret.name}</h1>
             <p className="mt-1 text-sm text-slate-500">
-              {secret.type}
+              {SECRET_TYPE_LABELS[secret.type]}
               {secret.provider && ` · ${secret.provider}`} · version #{secret.currentVersion}
             </p>
             {secret.description && <p className="mt-1 text-sm text-slate-400">{secret.description}</p>}

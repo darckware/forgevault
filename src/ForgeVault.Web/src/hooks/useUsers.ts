@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type { UserResponse } from "@/types/api";
 
 export function useUsers() {
@@ -34,6 +34,16 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, ...payload }: { id: string; username?: string; firstName?: string; lastName?: string; isAdmin?: boolean }) =>
       apiPatch<UserResponse>(`/api/v1/users/${id}`, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+// Hard delete — distinct from useSetUserActive's deactivate, which is the reversible,
+// audit-preserving choice for routine offboarding.
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<void>(`/api/v1/users/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
 }
