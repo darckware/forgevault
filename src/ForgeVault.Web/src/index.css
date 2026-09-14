@@ -8,6 +8,68 @@ body,
   height: 100%;
 }
 
+/*
+ * Theme tokens as CSS custom properties (R G B channel triplets, so Tailwind's
+ * rgb(var(--x) / alpha-value) config picks up opacity modifiers like bg-vault-ink/40
+ * correctly, see tailwind.config.js). :root holds the light values; .dark overrides them,
+ * toggled on the html element by src/lib/theme.tsx. Dark is simply ForgeVault's original,
+ * only palette (this app was dark-only until this revision); light is new, designed to
+ * keep the same vault identity (the teal accent, the vault-ink emphasis panels) on a pale
+ * background instead of inventing an unrelated look.
+ */
+:root {
+  --vault-bg: 248 250 252;
+  --vault-bg-deep: 226 232 240;
+  --vault-surface: 204 251 241;
+  --vault-surface-dim: 236 253 250;
+  --vault-surface-border: 203 213 225;
+  --vault-accent: 13 148 136;
+  --vault-accent-bright: 15 118 110;
+  --vault-accent-dark: 13 148 136;
+  --vault-danger: 225 29 72;
+  --vault-warning: 217 119 6;
+  /* vault-ink stays the same dark value in both themes on purpose: the handful of
+     vault-door emphasis panels (RevealSecretButton, RenderMcpConfigButton) are meant to
+     read as a deliberately dark accent regardless of the surrounding theme. */
+  --vault-ink: 2 44 34;
+
+  /* Tailwind's built-in slate scale, remapped through variables (tailwind.config.js) so
+     the many existing text-slate/bg-slate/border-slate utility usages across the app get a
+     working light-mode value for free, without touching every call site. Light values are
+     the dark theme's ramp read backwards: the shade that reads as high-contrast foreground
+     in the dark palette becomes the shade that reads as high-contrast foreground against a
+     light background instead, and so on down the ramp. */
+  --tw-slate-100: 15 23 42;
+  --tw-slate-200: 30 41 59;
+  --tw-slate-300: 51 65 85;
+  --tw-slate-400: 71 85 105;
+  --tw-slate-500: 100 116 139;
+  --tw-slate-600: 148 163 184;
+  --tw-slate-700: 203 213 225;
+}
+
+.dark {
+  --vault-bg: 15 23 42;
+  --vault-bg-deep: 2 6 23;
+  --vault-surface: 22 78 99;
+  --vault-surface-dim: 14 47 61;
+  --vault-surface-border: 8 51 68;
+  --vault-accent: 45 212 191;
+  --vault-accent-bright: 94 234 212;
+  --vault-accent-dark: 13 148 136;
+  --vault-danger: 244 63 94;
+  --vault-warning: 245 158 11;
+  --vault-ink: 2 44 34;
+
+  --tw-slate-100: 241 245 249;
+  --tw-slate-200: 226 232 240;
+  --tw-slate-300: 203 213 225;
+  --tw-slate-400: 148 163 184;
+  --tw-slate-500: 100 116 139;
+  --tw-slate-600: 71 85 105;
+  --tw-slate-700: 51 65 85;
+}
+
 body {
-  background-color: #020617;
+  background-color: rgb(var(--vault-bg));
 }

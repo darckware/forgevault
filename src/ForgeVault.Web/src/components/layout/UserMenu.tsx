@@ -1,18 +1,40 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, KeyRound, Loader2, LogOut, ShieldCheck, User as UserIcon } from "lucide-react";
+import {
+  Camera,
+  Check,
+  ExternalLink,
+  Info,
+  KeyRound,
+  Laptop,
+  Loader2,
+  LogOut,
+  Moon,
+  ShieldCheck,
+  Sun,
+  User as UserIcon,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { useChangeMyPassword, useLogout, useMe, useMfaEnroll, useMfaVerify, useUpdateMe } from "@/hooks/useAuth";
+import { useSystemVersion } from "@/hooks/useSystem";
+import { useTheme } from "@/lib/theme";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { MonoId } from "@/components/ui/MonoId";
+import { Spinner } from "@/components/ui/Spinner";
 import { ApiError } from "@/lib/api";
 import type { MeResponse } from "@/types/api";
 
 const MAX_AVATAR_BYTES = 2_000_000;
+
+const THEME_OPTIONS = [
+  { value: "light" as const, label: "Claro", icon: Sun },
+  { value: "dark" as const, label: "Escuro", icon: Moon },
+  { value: "system" as const, label: "Sistema", icon: Laptop },
+];
 
 function displayName(me: MeResponse): string {
   const full = [me.firstName, me.lastName].filter(Boolean).join(" ");
@@ -267,6 +289,68 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Mirrors ForgeHub's UserSettingsMenu AboutModal (GET /api/v1/system/version) field-for-field.
+function AboutModal({ onClose }: { onClose: () => void }) {
+  const version = useSystemVersion(true);
+
+  return (
+    <Modal open onClose={onClose} title="Sobre">
+      {version.isPending && (
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner />
+          Carregando...
+        </div>
+      )}
+      {version.isError && <p className="text-sm text-vault-danger">Falha ao carregar a versão do sistema.</p>}
+      {version.data && (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+          <dt className="text-slate-500">Versão</dt>
+          <dd className="font-mono text-slate-200">{version.data.appVersion}</dd>
+          <dt className="text-slate-500">Commit</dt>
+          <dd className="min-w-0 break-all font-mono text-slate-200">
+            {version.data.gitCommitUrl ? (
+              <a
+                className="inline-flex items-center gap-1 text-vault-accent-bright hover:underline"
+                href={version.data.gitCommitUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {version.data.gitSha}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ) : (
+              version.data.gitSha
+            )}
+          </dd>
+          <dt className="text-slate-500">Build</dt>
+          <dd className="break-all font-mono text-xs text-slate-300">{version.data.buildDate}</dd>
+          <dt className="text-slate-500">PostgreSQL</dt>
+          <dd className="break-words text-xs text-slate-300">{version.data.postgresVersion ?? "indisponível"}</dd>
+          <dt className="text-slate-500">Migration</dt>
+          <dd className="break-all font-mono text-xs text-slate-300">{version.data.latestMigrationBundled ?? "indisponível"}</dd>
+          <dt className="text-slate-500">Repositório</dt>
+          <dd>
+            <a
+              className="inline-flex items-center gap-1 text-vault-accent-bright hover:underline"
+              href={version.data.githubRepoUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </dd>
+        </dl>
+      )}
+      <div className="mt-5 flex justify-end">
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          Fechar
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 // Bottom-of-sidebar identity + account menu — same UX shape as ForgeHub's sidebar user row
 // (avatar trigger, dropdown with Account/Change password/Admin/Logout), rebuilt on
 // ForgeVault's own vault-* design system rather than ForgeHub's shadcn/ui tokens
@@ -274,11 +358,12 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { data: me } = useMe();
   const [open, setOpen] = useState(false);
-  const [modal, setModal] = useState<"account" | "password" | null>(null);
+  const [modal, setModal] = useState<"account" | "password" | "about" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   useClickOutside(containerRef, () => setOpen(false), open);
   const navigate = useNavigate();
   const logout = useLogout();
+  const { theme, setTheme } = useTheme();
 
   if (!me) {
     return (
@@ -357,6 +442,31 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
               Controle administrativo
             </button>
             <div className="my-1 border-t border-vault-surface-border" />
+            <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Tema</p>
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-vault-surface-dim hover:text-slate-100"
+                onClick={() => setTheme(opt.value)}
+              >
+                <opt.icon className="h-3.5 w-3.5" />
+                <span className="flex-1">{opt.label}</span>
+                {theme === opt.value && <Check className="h-3.5 w-3.5 text-vault-accent-bright" />}
+              </button>
+            ))}
+            <div className="my-1 border-t border-vault-surface-border" />
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-vault-surface-dim hover:text-slate-100"
+              onClick={() => {
+                setModal("about");
+                setOpen(false);
+              }}
+            >
+              <Info className="h-3.5 w-3.5" />
+              Sobre
+            </button>
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-400 hover:bg-vault-surface-dim hover:text-slate-100"
@@ -371,6 +481,7 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
 
       {modal === "account" && <AccountModal onClose={() => setModal(null)} />}
       {modal === "password" && <ChangePasswordModal onClose={() => setModal(null)} />}
+      {modal === "about" && <AboutModal onClose={() => setModal(null)} />}
     </>
   );
 }

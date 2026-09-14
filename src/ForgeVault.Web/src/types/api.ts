@@ -195,6 +195,17 @@ export interface RoleAssignmentResponse {
   revokedAt: string | null;
 }
 
+// --- System (M16) ---
+export interface SystemVersionResponse {
+  appVersion: string;
+  gitSha: string;
+  gitCommitUrl: string | null;
+  buildDate: string;
+  postgresVersion: string | null;
+  latestMigrationBundled: string | null;
+  githubRepoUrl: string;
+}
+
 // --- Users (M13 admin, M15 profile fields) ---
 export interface UserResponse {
   id: string;

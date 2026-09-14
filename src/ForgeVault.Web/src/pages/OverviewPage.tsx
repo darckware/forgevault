@@ -57,13 +57,13 @@ function SystemHealthCard() {
 
           {stats.expiringSoon.length > 0 && (
             <div className="mt-4 rounded-md border border-vault-warning/40 bg-vault-warning/10 p-3">
-              <div className="mb-1 flex items-center gap-1.5 text-sm font-medium text-amber-200">
+              <div className="mb-1 flex items-center gap-1.5 text-sm font-medium text-amber-800 dark:text-amber-200">
                 <AlertTriangle className="h-4 w-4" />
                 {stats.expiringSoon.length} secret(s) expirando nos próximos 7 dias
               </div>
               <ul className="flex flex-col gap-1">
                 {stats.expiringSoon.map((s) => (
-                  <li key={s.id} className="text-xs text-amber-100">
+                  <li key={s.id} className="text-xs text-amber-700 dark:text-amber-100">
                     <MonoId value={s.name} truncate={false} copyable={false} /> — expira em {formatDateTime(s.expiresAt)}
                   </li>
                 ))}

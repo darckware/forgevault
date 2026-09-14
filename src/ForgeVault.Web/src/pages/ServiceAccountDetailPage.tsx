@@ -100,7 +100,7 @@ export function ServiceAccountDetailPage() {
 
       <Modal open={!!freshToken} onClose={() => setFreshToken(null)} title="Copy this token now">
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-amber-200">This value will not be shown again. Store it in the agent's own vault immediately.</p>
+          <p className="text-sm text-amber-800 dark:text-amber-200">This value will not be shown again. Store it in the agent's own vault immediately.</p>
           {freshToken && <MonoId value={freshToken.token} truncate={false} />}
         </div>
       </Modal>

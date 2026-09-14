@@ -113,10 +113,10 @@ export function RevealSecretButton({
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Reveal secret value">
         <div className="flex flex-col gap-3">
-          <div className="flex gap-2 rounded-md bg-vault-warning/10 p-3 text-sm text-amber-200">
+          <div className="flex gap-2 rounded-md bg-vault-warning/10 p-3 text-sm text-amber-800 dark:text-amber-200">
             <ShieldAlert className="h-4 w-4 shrink-0" />
             <p>
-              You are about to reveal <span className="font-mono text-amber-100">{secretName}</span>&apos;s live value.
+              You are about to reveal <span className="font-mono text-amber-700 dark:text-amber-100">{secretName}</span>&apos;s live value.
               This action is logged in the audit trail.
             </p>
           </div>

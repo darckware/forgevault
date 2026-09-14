@@ -2,6 +2,16 @@
 # once the Api project has real dependencies worth optimizing image layers for.
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
+# M16 — build identity surfaced at GET /api/v1/system/version, same pattern as ForgeHub's
+# backend/Dockerfile (FORGEHUB_VERSION/_GIT_SHA/_BUILD_DATE). Set by deploy/scripts/build.sh;
+# "unknown" when built any other way (e.g. `docker compose build` directly), never guessed.
+ARG FORGEVAULT_VERSION=unknown
+ARG FORGEVAULT_GIT_SHA=unknown
+ARG FORGEVAULT_BUILD_DATE=unknown
+ENV FORGEVAULT_VERSION=$FORGEVAULT_VERSION \
+    FORGEVAULT_GIT_SHA=$FORGEVAULT_GIT_SHA \
+    FORGEVAULT_BUILD_DATE=$FORGEVAULT_BUILD_DATE
+
 WORKDIR /src
 
 COPY . .

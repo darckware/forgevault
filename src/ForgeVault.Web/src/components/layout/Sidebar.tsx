@@ -66,9 +66,45 @@ export function Sidebar() {
         collapsed ? "w-16" : "w-56",
       )}
     >
-      <div className={cn("flex items-center gap-2 px-4 py-5", collapsed && "justify-center px-2")}>
-        <img src="/forgevault-icon.svg" alt="ForgeVault" className="h-7 w-7 shrink-0" />
-        {!collapsed && <span className="truncate text-sm font-semibold tracking-wide text-slate-100">ForgeVault</span>}
+      <div
+        className={cn(
+          "flex h-16 items-center border-b border-vault-surface-border",
+          collapsed ? "justify-center px-2" : "justify-between px-4",
+        )}
+      >
+        {collapsed ? (
+          // Icon-rail mode: the logo itself is the expand trigger — hover swaps the mark
+          // for the expand icon, same affordance ForgeHub's Sidebar uses for its own
+          // collapsed logo button.
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            className="group relative flex h-10 w-10 items-center justify-center rounded-md hover:bg-vault-surface-dim/60"
+          >
+            <img src="/forgevault-icon.svg" alt="" className="h-7 w-7 shrink-0 transition-opacity group-hover:opacity-0" />
+            <PanelLeftOpen className="absolute h-4 w-4 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100" />
+            <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-vault-surface-border bg-vault-bg px-2 py-1 text-xs font-medium text-slate-100 opacity-0 shadow-vault-glow transition-opacity group-hover:opacity-100">
+              Expand sidebar
+            </span>
+          </button>
+        ) : (
+          <>
+            <div className="flex min-w-0 items-center gap-2">
+              <img src="/forgevault-icon.svg" alt="ForgeVault" className="h-7 w-7 shrink-0" />
+              <span className="truncate text-sm font-semibold tracking-wide text-slate-100">ForgeVault</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-vault-surface-dim/60 hover:text-slate-200"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          </>
+        )}
       </div>
 
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2">
@@ -97,19 +133,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className={cn(
-          "mx-2 mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-xs text-slate-500 transition-colors hover:bg-vault-surface-dim/50 hover:text-slate-200",
-          collapsed && "justify-center px-2",
-        )}
-      >
-        {collapsed ? <PanelLeftOpen className="h-4 w-4 shrink-0" /> : <PanelLeftClose className="h-4 w-4 shrink-0" />}
-        {!collapsed && "Collapse"}
-      </button>
 
       <UserMenu collapsed={collapsed} />
     </aside>

@@ -67,7 +67,7 @@ export function RenderMcpConfigButton({ assignmentId }: { assignmentId: string }
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Render MCP config">
         <div className="flex flex-col gap-3">
-          <div className="flex gap-2 rounded-md bg-vault-warning/10 p-3 text-sm text-amber-200">
+          <div className="flex gap-2 rounded-md bg-vault-warning/10 p-3 text-sm text-amber-800 dark:text-amber-200">
             <ShieldAlert className="h-4 w-4 shrink-0" />
             <p>Every referenced secret in this assignment will be decrypted. This action is logged in the audit trail.</p>
           </div>

@@ -6,9 +6,9 @@ import type { BadgeTone } from "@/lib/format";
 const TONE_STYLES: Record<BadgeTone, string> = {
   neutral: "bg-slate-700/40 text-slate-300 border-slate-600/50",
   success: "bg-vault-accent-dark/20 text-vault-accent-bright border-vault-accent-dark/50",
-  warning: "bg-vault-warning/20 text-amber-300 border-vault-warning/40",
-  danger: "bg-vault-danger/20 text-rose-300 border-vault-danger/40",
-  info: "bg-sky-500/20 text-sky-300 border-sky-500/40",
+  warning: "bg-vault-warning/20 text-amber-700 dark:text-amber-300 border-vault-warning/40",
+  danger: "bg-vault-danger/20 text-rose-700 dark:text-rose-300 border-vault-danger/40",
+  info: "bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/40",
 };
 
 export interface BadgeProps {

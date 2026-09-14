@@ -184,6 +184,36 @@ app.MapGet("/health/ready", async (ForgeVaultDbContext db) =>
         : Results.Json(new { status = "unavailable", dependencies }, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
 
+// M16 — read-only build identity, same shape and same unauthenticated-router convention as
+// ForgeHub's GET /api/v1/system/version (backend/app/api/routes/system_info.py): app
+// version/git sha/build date come from env vars a build script sets (deploy/scripts/build.sh,
+// mirroring ForgeHub's scripts/build.sh), never hardcoded and never guessed when absent.
+app.MapGet("/api/v1/system/version", async (ForgeVaultDbContext db) =>
+{
+    var gitSha = System.Environment.GetEnvironmentVariable("FORGEVAULT_GIT_SHA") ?? "unknown";
+
+    string? postgresVersion;
+    try
+    {
+        postgresVersion = (await db.Database.SqlQuery<string>($"SELECT version()").ToListAsync()).FirstOrDefault();
+    }
+    catch
+    {
+        postgresVersion = null;
+    }
+
+    return Results.Ok(new
+    {
+        appVersion = System.Environment.GetEnvironmentVariable("FORGEVAULT_VERSION") ?? "unknown",
+        gitSha,
+        gitCommitUrl = gitSha == "unknown" ? null : $"https://github.com/marcelodarckferreira/forgevault/commit/{gitSha}",
+        buildDate = System.Environment.GetEnvironmentVariable("FORGEVAULT_BUILD_DATE") ?? "unknown",
+        postgresVersion,
+        latestMigrationBundled = db.Database.GetMigrations().LastOrDefault(),
+        githubRepoUrl = "https://github.com/marcelodarckferreira/forgevault",
+    });
+});
+
 app.Run();
 
 // Exposes the top-level-statement-generated Program class to
