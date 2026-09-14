@@ -271,7 +271,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 // (avatar trigger, dropdown with Account/Change password/Admin/Logout), rebuilt on
 // ForgeVault's own vault-* design system rather than ForgeHub's shadcn/ui tokens
 // (docs/architecture/TARGET_ARCHITECTURE.md §10 — ForgeVault never reuses that design system).
-export function UserMenu() {
+export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { data: me } = useMe();
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<"account" | "password" | null>(null);
@@ -294,22 +294,33 @@ export function UserMenu() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
+          title={collapsed ? displayName(me) : undefined}
           className={cn(
             "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-vault-surface-dim/60",
+            collapsed && "justify-center px-0",
             open && "bg-vault-surface-dim/60",
           )}
         >
           <UserAvatar me={me} className="h-7 w-7 shrink-0 text-xs" />
-          <span className="min-w-0 flex-1 truncate text-xs text-slate-300">{displayName(me)}</span>
-          {me.isAdmin && (
-            <span className="shrink-0">
-              <Badge tone="success">Admin</Badge>
-            </span>
+          {!collapsed && (
+            <>
+              <span className="min-w-0 flex-1 truncate text-xs text-slate-300">{displayName(me)}</span>
+              {me.isAdmin && (
+                <span className="shrink-0">
+                  <Badge tone="success">Admin</Badge>
+                </span>
+              )}
+            </>
           )}
         </button>
 
         {open && (
-          <div className="absolute inset-x-3 bottom-full z-20 mb-1 overflow-hidden rounded-md border border-vault-surface-border bg-vault-bg py-1 shadow-xl">
+          <div
+            className={cn(
+              "absolute bottom-full z-20 mb-1 w-56 overflow-hidden rounded-md border border-vault-surface-border bg-vault-bg py-1 shadow-xl",
+              collapsed ? "left-2" : "inset-x-3 w-auto",
+            )}
+          >
             <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Conta</p>
             <button
               type="button"
