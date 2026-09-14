@@ -179,6 +179,27 @@ public sealed class AuthService(
         return true;
     }
 
+    public async Task<bool> DisableMfaAsync(Guid userId, string currentPassword, CancellationToken ct)
+    {
+        var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
+        if (!passwordHasher.Verify(currentPassword, user.PasswordHash))
+        {
+            logger.LogInformation("Disable MFA rejected: current password did not match.");
+            return false;
+        }
+
+        user.MfaEnabled = false;
+        user.MfaSecretCiphertext = null;
+        user.MfaSecretEncryptedDek = null;
+        user.MfaSecretNonce = null;
+        user.MfaSecretAuthTag = null;
+        user.MfaSecretAlgorithm = null;
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     private async Task<AuthOutcome> IssueTokensAsync(User user, Guid familyId, bool mfaVerified, CancellationToken ct)
     {
         var options = jwtOptions.Value;

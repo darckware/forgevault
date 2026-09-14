@@ -26,6 +26,13 @@ public interface IAuthService
     // change is exactly the moment every other session should be forced to re-authenticate,
     // same as the reuse-detection path already does for a single compromised family).
     Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct);
+
+    // Requires the current password for the same reason ChangePasswordAsync does — MFA is a
+    // security control, so turning it off must not be possible with only a stolen/still-open
+    // session; something the attacker doesn't have (the password) is required too. Returns
+    // false (not an exception) when currentPassword doesn't match. Idempotent: disabling an
+    // already-disabled account still succeeds and clears any stray secret columns.
+    Task<bool> DisableMfaAsync(Guid userId, string currentPassword, CancellationToken ct);
 }
 
 public abstract record AuthOutcome;

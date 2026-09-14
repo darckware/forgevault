@@ -49,6 +49,30 @@ public sealed class MfaFlowTests(WebApplicationFactory<Program> factory) : IClas
         Assert.Equal(HttpStatusCode.OK, loginWithMfa.StatusCode);
     }
 
+    [Fact]
+    public async Task DisableMfa_RequiresCurrentPassword_ThenLoginNoLongerNeedsACode()
+    {
+        var (client, userId, email, password) = await CreateAuthenticatedUserAsync();
+        await client.PostAsync("/api/v1/auth/mfa/enroll", content: null);
+        var validCode = await ComputeCurrentTotpCodeAsync(userId);
+        await client.PostAsJsonAsync("/api/v1/auth/mfa/verify", new { code = validCode });
+
+        var wrongPasswordResponse = await client.PostAsJsonAsync("/api/v1/auth/mfa/disable", new { currentPassword = "not-the-password" });
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongPasswordResponse.StatusCode);
+
+        var disableResponse = await client.PostAsJsonAsync("/api/v1/auth/mfa/disable", new { currentPassword = password });
+        Assert.Equal(HttpStatusCode.OK, disableResponse.StatusCode);
+
+        var loginResponse = await factory.CreateClient().PostAsJsonAsync("/api/v1/auth/login", new { email, password });
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        var row = await db.Users.SingleAsync(u => u.Id == userId);
+        Assert.False(row.MfaEnabled);
+        Assert.Null(row.MfaSecretCiphertext);
+    }
+
     private async Task<string> ComputeCurrentTotpCodeAsync(Guid userId)
     {
         using var scope = factory.Services.CreateScope();

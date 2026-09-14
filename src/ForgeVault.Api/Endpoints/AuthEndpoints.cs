@@ -121,6 +121,16 @@ public static class AuthEndpoints
                 ? Results.Ok(new MfaVerifyResponse(true))
                 : Results.Json(new ErrorResponse("invalid_mfa_code"), statusCode: StatusCodes.Status401Unauthorized);
         }).RequireAuthorization();
+
+        // Requires the current password, same principle as change-password: turning off a
+        // security control must not be possible with only a still-open/stolen session.
+        group.MapPost("/mfa/disable", async (DisableMfaRequest request, IAuthService authService, ClaimsPrincipal user, CancellationToken ct) =>
+        {
+            var disabled = await authService.DisableMfaAsync(user.GetUserId(), request.CurrentPassword, ct);
+            return disabled
+                ? Results.Ok(new MfaVerifyResponse(false))
+                : Results.Json(new ErrorResponse("invalid_credentials"), statusCode: StatusCodes.Status401Unauthorized);
+        }).RequireAuthorization();
     }
 
     // Named records (rather than anonymous objects) so the response shape is explicit and
@@ -141,6 +151,8 @@ public sealed record LoginRequest(string Email, string Password, string? MfaCode
 public sealed record RefreshRequest(string RefreshToken);
 
 public sealed record MfaVerifyRequest(string Code);
+
+public sealed record DisableMfaRequest(string CurrentPassword);
 
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 

@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useClickOutside } from "@/hooks/useClickOutside";
-import { useChangeMyPassword, useLogout, useMe, useMfaEnroll, useMfaVerify, useUpdateMe } from "@/hooks/useAuth";
+import QRCode from "qrcode";
+import { useChangeMyPassword, useLogout, useMe, useMfaDisable, useMfaEnroll, useMfaVerify, useUpdateMe } from "@/hooks/useAuth";
 import { useSystemVersion } from "@/hooks/useSystem";
 import { useTheme } from "@/lib/theme";
 import { Modal } from "@/components/ui/Modal";
@@ -64,9 +65,15 @@ function AccountModal({ onClose }: { onClose: () => void }) {
   const [enrolling, setEnrolling] = useState(false);
   const [code, setCode] = useState("");
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const enroll = useMfaEnroll();
   const verify = useMfaVerify();
   const updateMe = useUpdateMe();
+
+  const [disabling, setDisabling] = useState(false);
+  const [disablePassword, setDisablePassword] = useState("");
+  const [disableError, setDisableError] = useState<string | null>(null);
+  const disable = useMfaDisable();
 
   const [firstName, setFirstName] = useState(me?.firstName ?? "");
   const [lastName, setLastName] = useState(me?.lastName ?? "");
@@ -74,13 +81,31 @@ function AccountModal({ onClose }: { onClose: () => void }) {
   const [profileSaved, setProfileSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleEnroll = async () => {
+    const enrollment = await enroll.mutateAsync();
+    setEnrolling(true);
+    setQrDataUrl(await QRCode.toDataURL(enrollment.otpAuthUri, { margin: 1, width: 176 }));
+  };
+
   const handleVerify = async () => {
     setVerifyError(null);
     try {
       await verify.mutateAsync(code);
       setEnrolling(false);
+      setQrDataUrl(null);
     } catch (err) {
       setVerifyError(err instanceof ApiError ? (err.body?.error ?? err.message) : "Failed to verify code");
+    }
+  };
+
+  const handleDisable = async () => {
+    setDisableError(null);
+    try {
+      await disable.mutateAsync(disablePassword);
+      setDisabling(false);
+      setDisablePassword("");
+    } catch (err) {
+      setDisableError(err instanceof ApiError && err.status === 401 ? "Senha atual incorreta." : "Falha ao desativar MFA.");
     }
   };
 
@@ -170,26 +195,22 @@ function AccountModal({ onClose }: { onClose: () => void }) {
           </div>
 
           {!me?.mfaEnabled && !enrolling && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="mt-3"
-              isLoading={enroll.isPending}
-              onClick={async () => {
-                await enroll.mutateAsync();
-                setEnrolling(true);
-              }}
-            >
+            <Button variant="secondary" size="sm" className="mt-3" isLoading={enroll.isPending} onClick={handleEnroll}>
               Ativar MFA
             </Button>
           )}
 
           {!me?.mfaEnabled && enrolling && enroll.data && (
-            <div className="mt-3 flex flex-col gap-2">
+            <div className="mt-3 flex flex-col gap-3">
               <p className="text-xs text-slate-400">
-                Adicione esta chave no seu app autenticador (Google Authenticator, 1Password, etc.), depois digite o código
-                de 6 dígitos abaixo.
+                Escaneie o QR code com seu aplicativo autenticador (Google Authenticator, 1Password, etc.) — ou digite a
+                chave manualmente — depois informe o código de 6 dígitos abaixo.
               </p>
+              {qrDataUrl && (
+                <div className="flex justify-center rounded-md bg-white p-3">
+                  <img src={qrDataUrl} alt="QR code de configuração do MFA" width={176} height={176} />
+                </div>
+              )}
               <MonoId label="Chave" value={enroll.data.base32Secret} truncate={false} />
               <Input
                 label="Código de 6 dígitos"
@@ -199,11 +220,55 @@ function AccountModal({ onClose }: { onClose: () => void }) {
                 error={verifyError ?? undefined}
               />
               <div className="flex justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setEnrolling(false)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEnrolling(false);
+                    setQrDataUrl(null);
+                  }}
+                >
                   Cancelar
                 </Button>
                 <Button size="sm" isLoading={verify.isPending} onClick={handleVerify}>
                   Confirmar
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {me?.mfaEnabled && !disabling && (
+            <Button variant="danger" size="sm" className="mt-3" onClick={() => setDisabling(true)}>
+              Desativar MFA
+            </Button>
+          )}
+
+          {me?.mfaEnabled && disabling && (
+            <div className="mt-3 flex flex-col gap-2">
+              <p className="text-xs text-slate-400">
+                Confirme sua senha atual para desativar a autenticação em duas etapas.
+              </p>
+              <Input
+                label="Senha atual"
+                type="password"
+                value={disablePassword}
+                onChange={(e) => setDisablePassword(e.target.value)}
+                error={disableError ?? undefined}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDisabling(false);
+                    setDisablePassword("");
+                    setDisableError(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button variant="danger" size="sm" isLoading={disable.isPending} onClick={handleDisable}>
+                  Desativar
                 </Button>
               </div>
             </div>
