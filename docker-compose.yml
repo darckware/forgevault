@@ -54,6 +54,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__ForgeVault: "Host=postgres;Port=5432;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
       ConnectionStrings__Redis: "redis:6379"
+      # Empty = feature off (fail-open) — same convention as ForgeHub/Darckware. Set
+      # RECAPTCHA_SECRET_KEY in a .env file at the repo root once a key pair is provisioned.
+      Recaptcha__SecretKey: ${RECAPTCHA_SECRET_KEY:-}
     volumes:
       # LocalFileKeyProvider fails fast without this (docs/modules/03_SECRETS_AND_ENCRYPTION.md)
       # — read-only mount of the same host-generated Master Key used by local `dotnet run`,
@@ -64,6 +67,8 @@ services:
     build:
       context: src/ForgeVault.Web
       dockerfile: Dockerfile
+      args:
+        VITE_RECAPTCHA_SITE_KEY: ${RECAPTCHA_SITE_KEY:-}
     depends_on:
       - api
     # Bound to 127.0.0.1 only (never 0.0.0.0) — same "localhost only" requirement as `api`
