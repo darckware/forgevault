@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { SECRET_TYPES } from "@/types/api";
@@ -82,18 +83,27 @@ export function SecretForm({ onSubmit, isSubmitting, submitLabel = "Create secre
           <p className="text-xs text-slate-500">
             {selectedType === "Password" ? "Site login" : "Database connection"} — stored as one encrypted credential.
           </p>
-          {structured.map((field) => (
-            <Input
-              key={field.key}
-              label={field.label}
-              placeholder={field.placeholder}
-              type={field.sensitive ? "password" : "text"}
-              {...register(`structuredFields.${field.key}`, { required: true })}
-            />
-          ))}
+          {structured.map((field) =>
+            field.sensitive ? (
+              <PasswordInput
+                key={field.key}
+                label={field.label}
+                placeholder={field.placeholder}
+                {...register(`structuredFields.${field.key}`, { required: true })}
+              />
+            ) : (
+              <Input
+                key={field.key}
+                label={field.label}
+                placeholder={field.placeholder}
+                type="text"
+                {...register(`structuredFields.${field.key}`, { required: true })}
+              />
+            ),
+          )}
         </div>
       ) : (
-        <Input label="Value" type="password" {...register("value", { required: true })} error={errors.value?.message} />
+        <PasswordInput label="Value" {...register("value", { required: true })} error={errors.value?.message} />
       )}
 
       <Input label="Expires at (optional)" type="datetime-local" {...register("expiresAt")} />

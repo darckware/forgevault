@@ -5,6 +5,7 @@ import { RefreshCw, ShieldOff } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Modal } from "@/components/ui/Modal";
 import { Tabs } from "@/components/ui/Tabs";
 import { Spinner } from "@/components/ui/Spinner";
@@ -194,9 +195,8 @@ export function SecretDetailPage() {
             <div className="flex flex-col gap-6">
               <form onSubmit={updateForm.handleSubmit(onUpdate)} className="flex flex-col gap-3">
                 <h3 className="text-sm font-medium text-slate-300">Update value (creates a new version)</h3>
-                <Input
+                <PasswordInput
                   label="New value"
-                  type="password"
                   disabled={!isActive}
                   {...updateForm.register("value", { required: true })}
                 />
@@ -230,7 +230,7 @@ export function SecretDetailPage() {
           <p className="text-sm text-slate-400">
             Rotating creates a new version and is audited as a distinct action from a regular update.
           </p>
-          <Input label="New value" type="password" {...rotateForm.register("value", { required: true })} />
+          <PasswordInput label="New value" {...rotateForm.register("value", { required: true })} />
           <Button type="submit" isLoading={rotateSecret.isPending}>
             Rotate
           </Button>
