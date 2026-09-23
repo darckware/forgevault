@@ -5,196 +5,197 @@
 <h1 align="center">ForgeVault</h1>
 
 <p align="center">
-  Cofre central de credenciais e secrets do ecossistema Darckware.<br>
-  A <em>Security Plane</em> compartilhada consumida por <strong>ForgeHub</strong>, <strong>ForgeRouter</strong>, Hermes e demais agentes/serviços.
+  Central credentials and secrets vault for the Darckware ecosystem.<br>
+  The shared <em>Security Plane</em> consumed by <strong>ForgeHub</strong>, <strong>ForgeRouter</strong>, Hermes, and other agents/services.
 </p>
 
 <p align="center">
   <a href="https://github.com/marcelodarckferreira/forgevault/actions/workflows/ci.yml"><img src="https://github.com/marcelodarckferreira/forgevault/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/PostgreSQL-17-336791" alt="PostgreSQL 17">
-  <img src="https://img.shields.io/badge/status-Onda%201%20(MVP)%20%2B%20M8%2FM9-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/status-Wave%201%20(MVP)%20%2B%20M8%2FM9-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License">
 </p>
 
 ---
 
-## O que é o ForgeVault
+## What ForgeVault is
 
-Nenhum agente, serviço ou humano deveria precisar hardcodar uma API key, uma senha de banco
-ou um token de terceiro para operar dentro do ecossistema Darckware. O ForgeVault existe para
-resolver exatamente isso: um cofre central de credenciais com **envelope encryption**, **RBAC
-hierárquico**, **auditoria à prova de vazamento** e integração nativa — via REST e via
-**MCP Server** — para que ForgeHub, ForgeRouter e agentes autônomos obtenham credenciais sob
-demanda, sem que elas fiquem espalhadas em `.env`, repositórios ou configs.
+No agent, service, or human should have to hardcode an API key, a database password,
+or a third-party token to operate within the Darckware ecosystem. ForgeVault exists to
+solve exactly that: a central credentials vault with **envelope encryption**, **hierarchical
+RBAC**, **leak-proof auditing**, and native integration — via REST and via
+**MCP Server** — so that ForgeHub, ForgeRouter, and autonomous agents can obtain credentials
+on demand, without them being scattered across `.env` files, repositories, or configs.
 
-## Principais capacidades
+## Key capabilities
 
-| Capacidade | Descrição |
+| Capability | Description |
 |---|---|
-| **Envelope encryption** | AES-256-GCM por versão de secret, DEK protegido por uma Master Key (KEK) via provider plugável (`IKeyManagementProvider`) — trocar para um KMS/HSM real é uma troca de implementação, não de contrato |
-| **Versionamento imutável** | toda escrita cria uma nova `SecretVersion`; nada é sobrescrito, versões anteriores continuam legíveis |
-| **RBAC hierárquico** | `Organization → Project → Environment`, com herança de papel para baixo na hierarquia e uma matriz papel→permissão explícita |
-| **Auditoria à prova de vazamento** | toda leitura/escrita — inclusive negações — gera um `AuditLog`; testado ativamente para garantir que nenhum valor de secret apareça em log de aplicação ou de auditoria |
-| **Autenticação dupla** | JWT (humanos, com MFA/TOTP opcional) e tokens de Service Account (`fv_sa_...`, para ForgeHub/ForgeRouter/serviços) — o mesmo header `Authorization: Bearer` resolve os dois automaticamente |
-| **MCP Server nativo** | além da API REST, um servidor MCP (`/mcp`) expõe as mesmas operações como *tools* para agentes — mesma autenticação, mesmo RBAC, mesma trilha de auditoria, nenhum caminho paralelo |
-| **Backup/restore testado** | scripts que rodam `pg_dump`/`pg_restore` dentro do container Postgres, com a Master Key sempre em backup separado do banco |
+| **Envelope encryption** | AES-256-GCM per secret version, DEK protected by a Master Key (KEK) via a pluggable provider (`IKeyManagementProvider`) — switching to a real KMS/HSM is an implementation swap, not a contract change |
+| **Immutable versioning** | every write creates a new `SecretVersion`; nothing is overwritten, previous versions remain readable |
+| **Hierarchical RBAC** | `Organization → Project → Environment`, with role inheritance flowing down the hierarchy and an explicit role→permission matrix |
+| **Leak-proof auditing** | every read/write — including denials — generates an `AuditLog`; actively tested to guarantee that no secret value ever appears in application or audit logs |
+| **Dual authentication** | JWT (humans, with optional MFA/TOTP) and Service Account tokens (`fv_sa_...`, for ForgeHub/ForgeRouter/services) — the same `Authorization: Bearer` header resolves both automatically |
+| **Native MCP Server** | besides the REST API, an MCP server (`/mcp`) exposes the same operations as *tools* for agents — same authentication, same RBAC, same audit trail, no parallel path |
+| **Tested backup/restore** | scripts that run `pg_dump`/`pg_restore` inside the Postgres container, with the Master Key always backed up separately from the database |
 
-## Arquitetura
+## Architecture
 
-Clean Architecture — `Domain` não depende de nada externo; cada camada acima só conhece a que
-está abaixo dela:
+Clean Architecture — `Domain` depends on nothing external; each layer above only knows the
+one below it:
 
 ```text
-ForgeVault.Domain            entidades e regras de domínio
+ForgeVault.Domain            entities and domain rules
         ↑
-ForgeVault.Application       casos de uso, interfaces (IKeyManagementProvider, IPermissionChecker, ...)
+ForgeVault.Application       use cases, interfaces (IKeyManagementProvider, IPermissionChecker, ...)
         ↑
-ForgeVault.Infrastructure    EF Core + Npgsql, criptografia (AES-256-GCM), JWT, RBAC
+ForgeVault.Infrastructure    EF Core + Npgsql, cryptography (AES-256-GCM), JWT, RBAC
         ↑
 ForgeVault.Api               ASP.NET Core Web API — REST + MCP Server, composition root
-ForgeVault.Worker            jobs em background (expiração, rotação agendada)
-ForgeVault.Web               React + TypeScript (ainda não implementado)
+ForgeVault.Worker            background jobs (expiration, scheduled rotation)
+ForgeVault.Web               React + TypeScript (not yet implemented)
 ```
 
-**Stack:** ASP.NET Core (.NET 10), Entity Framework Core + Npgsql, PostgreSQL 17 como
-datastore único e autoritativo, Redis como suporte não-autoritativo, SDK oficial
-`ModelContextProtocol` para o servidor MCP.
+**Stack:** ASP.NET Core (.NET 10), Entity Framework Core + Npgsql, PostgreSQL 17 as the
+single authoritative datastore, Redis as non-authoritative support, the official
+`ModelContextProtocol` SDK for the MCP server.
 
-## Estrutura do repositório
+## Repository structure
 
 ```text
 forgevault/
 ├── src/
-│   ├── ForgeVault.Domain/          # entidades e regras de domínio
-│   ├── ForgeVault.Application/     # casos de uso e interfaces
-│   ├── ForgeVault.Infrastructure/  # EF Core, criptografia, JWT, RBAC
+│   ├── ForgeVault.Domain/          # entities and domain rules
+│   ├── ForgeVault.Application/     # use cases and interfaces
+│   ├── ForgeVault.Infrastructure/  # EF Core, cryptography, JWT, RBAC
 │   ├── ForgeVault.Api/             # Web API — REST + MCP Server
-│   ├── ForgeVault.Worker/          # jobs em background
+│   ├── ForgeVault.Worker/          # background jobs
 │   ├── ForgeVault.Web/             # frontend (React + TypeScript)
-│   └── ForgeVault.Cli/             # CLI `fv` — cliente puro sobre a API (módulo 08)
+│   └── ForgeVault.Cli/             # `fv` CLI — pure client on top of the API (module 08)
 ├── tests/
 │   └── Unit/, Integration/, Security/, E2E/
 ├── deploy/
 │   └── docker/, kubernetes/, scripts/
-├── docs/                           # comece por docs/README.md
+├── docs/                           # start at docs/README.md
 ├── docker-compose.yml
 └── ForgeVault.slnx
 ```
 
-## Começando
+## Getting started
 
-### Pré-requisitos
+### Prerequisites
 
 - .NET SDK 10
 - Docker (Postgres 17 + Redis via `docker-compose.yml`)
 - `dotnet-ef` (`dotnet tool install --global dotnet-ef`)
 
-### Subindo o ambiente
+### Bringing up the environment
 
 ```bash
-# Postgres (porta 5435 no host — ver docker-compose.yml para o motivo do não-padrão) + Redis
+# Postgres (port 5435 on the host — see docker-compose.yml for why it's non-standard) + Redis
 docker compose up -d postgres redis
 
-# aplica as migrations
+# apply the migrations
 dotnet ef database update --project src/ForgeVault.Infrastructure --startup-project src/ForgeVault.Api
 
-# Master Key — obrigatória, nunca gerada silenciosamente pela aplicação
+# Master Key — required, never generated silently by the application
 deploy/scripts/generate-master-key.sh
 
-# build e testes
+# build and tests
 dotnet build ForgeVault.slnx
 dotnet test ForgeVault.slnx
 
-# rodar a Api
+# run the Api
 dotnet run --project src/ForgeVault.Api
-# GET /health/live  -> 200 sempre
-# GET /health/ready -> 200 se o Postgres estiver acessível, 503 caso contrário
+# GET /health/live  -> always 200
+# GET /health/ready -> 200 if Postgres is reachable, 503 otherwise
 ```
 
-A Master Key vive em `/root/.forgevault/master.key` com permissão `600`
-(`LocalFileKeyProvider`, ver `docs/modules/03_SECRETS_AND_ENCRYPTION.md`). Testes unitários de
-criptografia usam chaves temporárias próprias e não dependem desse arquivo.
+The Master Key lives at `/root/.forgevault/master.key` with `600` permissions
+(`LocalFileKeyProvider`, see `docs/modules/03_SECRETS_AND_ENCRYPTION.md`). Cryptography unit
+tests use their own temporary keys and don't depend on this file.
 
 ### Dashboard (`ForgeVault.Web`)
 
 ```bash
-# via Docker (build + serve com nginx, proxy /api -> api:8080 dentro da rede do compose)
+# via Docker (build + serve with nginx, proxy /api -> api:8080 within the compose network)
 docker compose up -d --build api web
-# http://127.0.0.1:4200  — só localhost, nunca 0.0.0.0 (ver "Segurança" abaixo)
+# http://127.0.0.1:4200  — localhost only, never 0.0.0.0 (see "Security" below)
 
-# ou em desenvolvimento ativo, sem Docker
+# or for active development, without Docker
 cd src/ForgeVault.Web
 npm install
 npm run dev
-# http://localhost:5173 — o proxy do Vite encaminha /api para a Api rodando em :8080
+# http://localhost:5173 — the Vite proxy forwards /api to the Api running on :8080
 ```
 
-React + TypeScript + Vite + TailwindCSS, design system próprio (não o shadcn/ui do
-ForgeHub) tematizado como cofre — paleta derivada de `docs/assets/forgevault-icon.svg`,
-identificadores e valores de secret sempre em monospace, reveal como cadeado
-fechado/aberto com contagem regressiva. Cobre toda a hierarquia
-Organization→Project→Environment→Secret, Service Accounts, Access/Roles (M9) e Audit.
-Tanto `api` quanto `web` no `docker-compose.yml` só publicam em `127.0.0.1` — nunca
-`0.0.0.0` — porque o consumo é sempre local.
+React + TypeScript + Vite + TailwindCSS, its own design system (not ForgeHub's shadcn/ui),
+themed as a vault — palette derived from `docs/assets/forgevault-icon.svg`,
+identifiers and secret values always in monospace, reveal styled as a closed/open
+padlock with a countdown. Covers the entire
+Organization→Project→Environment→Secret hierarchy, Service Accounts, Access/Roles (M9), and Audit.
+Both `api` and `web` in `docker-compose.yml` only publish on `127.0.0.1` — never
+`0.0.0.0` — because consumption is always local.
 
-### Importando credenciais de um `.env` existente
+### Importing credentials from an existing `.env`
 
-Se você já tem senhas/chaves espalhadas em arquivos `.env`, `deploy/scripts/import_env.py`
-cadastra elas no ForgeVault de uma vez, agrupando variáveis relacionadas (ex.:
-`DB_HOST`/`DB_PASSWORD`/`DB_URL` viram um único secret `DB_PASSWORD` do tipo
-`DatabaseCredential`, com o host/porta/link/usuário guardados na descrição) e classificando
-o tipo de serviço automaticamente (Postgres, MySQL, Redis, SSH, S3, etc. — inclusive lendo o
-esquema de uma connection string como `postgres://...` quando o nome da variável não entrega
-o motor). Uma variável solta (só um `HOST`/`PORT`, sem senha/token no mesmo grupo) nunca vira
-secret sozinha — ela só enriquece a descrição do credential real do grupo.
+If you already have passwords/keys scattered across `.env` files, `deploy/scripts/import_env.py`
+registers them in ForgeVault in one pass, grouping related variables (e.g.
+`DB_HOST`/`DB_PASSWORD`/`DB_URL` become a single secret named `DB_PASSWORD` of type
+`DatabaseCredential`, with host/port/link/user stored in the description) and automatically
+classifying the service type (Postgres, MySQL, Redis, SSH, S3, etc. — including reading the
+scheme from a connection string like `postgres://...` when the variable name doesn't reveal
+the engine). A standalone variable (just a `HOST`/`PORT`, with no password/token in the same
+group) never becomes a secret on its own — it only enriches the description of the group's
+actual credential.
 
 ```bash
 python3 deploy/scripts/import_env.py \
-  --file /caminho/para/.env \
-  --environment-id <guid-do-environment> \
-  --email admin@darckware.local   # senha pedida interativamente, nunca por argumento
-# --dry-run mostra o que seria importado sem cadastrar nada
+  --file /path/to/.env \
+  --environment-id <environment-guid> \
+  --email admin@darckware.local   # password prompted interactively, never via argument
+# --dry-run shows what would be imported without registering anything
 ```
 
-`import_env.py` resolve só a metade do problema — cadastra o que já estava no `.env`, mas não
-tira a dependência do arquivo em si. Para isso existe a CLI `fv` (`src/ForgeVault.Cli`,
-`docs/modules/08_CLI_SDK.md`): depois do import, o sistema consumidor (ForgeHub, ForgeRouter,
-Darckware) pode apagar o `.env` e passar a rodar via `fv exec`, que busca os secrets do
-Environment em tempo de execução e injeta como variáveis de ambiente só no processo filho —
-nunca grava nada em disco.
+`import_env.py` only solves half the problem — it registers what was already in the `.env`,
+but doesn't remove the dependency on the file itself. That's what the `fv` CLI is for
+(`src/ForgeVault.Cli`, `docs/modules/08_CLI_SDK.md`): after the import, the consuming system
+(ForgeHub, ForgeRouter, Darckware) can delete the `.env` and run via `fv exec` instead, which
+fetches the Environment's secrets at runtime and injects them as environment variables only
+into the child process — never writing anything to disk.
 
 ```bash
-dotnet build src/ForgeVault.Cli   # gera bin/Debug/net10.0/fv
+dotnet build src/ForgeVault.Cli   # builds bin/Debug/net10.0/fv
 
-fv login --url http://127.0.0.1:8080 --token fv_sa_...   # ServiceAccount — recomendado p/ CI
-# ou: fv login --url http://127.0.0.1:8080 --email dev@example.com
+fv login --url http://127.0.0.1:8080 --token fv_sa_...   # ServiceAccount — recommended for CI
+# or: fv login --url http://127.0.0.1:8080 --email dev@example.com
 
-fv credential list --environment <guid-do-environment>
-fv exec --environment <guid-do-environment> -- docker compose up
-# FORGEVAULT_URL / FORGEVAULT_TOKEN substituem a sessão local — útil num runner de CI que
-# nunca chama `fv login`.
+fv credential list --environment <environment-guid>
+fv exec --environment <environment-guid> -- docker compose up
+# FORGEVAULT_URL / FORGEVAULT_TOKEN replace the local session — useful in a CI runner that
+# never calls `fv login`.
 
-fv export --environment <guid-do-environment>   # escape hatch de debug local — nunca em produção
+fv export --environment <environment-guid>   # local debug escape hatch — never in production
 ```
 
-Cobre hoje `login`/`logout`/`whoami`, `credential list`, `exec` e `export` — o restante da
-superfície de `docs/modules/08_CLI_SDK.md §7` (`credential rotate/revoke`, `access.*`,
-`session.*`, `token.*`, `audit search`) ainda não foi implementado.
+Currently covers `login`/`logout`/`whoami`, `credential list`, `exec`, and `export` — the rest
+of the surface from `docs/modules/08_CLI_SDK.md §7` (`credential rotate/revoke`, `access.*`,
+`session.*`, `token.*`, `audit search`) has not been implemented yet.
 
 ## API
 
-### Autenticação e MFA
+### Authentication and MFA
 
 ```text
-POST /api/v1/auth/login          JWT (15 min) + refresh token rotativo com detecção de reuso
+POST /api/v1/auth/login          JWT (15 min) + rotating refresh token with reuse detection
 POST /api/v1/auth/refresh
 GET  /api/v1/auth/me
-POST /api/v1/auth/mfa/enroll     TOTP (RFC 6238), HMACSHA1 puro do BCL
+POST /api/v1/auth/mfa/enroll     TOTP (RFC 6238), pure BCL HMACSHA1
 POST /api/v1/auth/mfa/verify
 ```
 
-### Organizações, projetos, ambientes e secrets
+### Organizations, projects, environments, and secrets
 
 ```text
 POST/GET/PUT/DELETE /api/v1/organizations[/{id}]
@@ -210,65 +211,65 @@ POST                /api/v1/secrets/{id}/rotate                            RBAC:
 POST                /api/v1/secrets/{id}/revoke                            RBAC: SecretWrite
 ```
 
-`mode` já existe no contrato de leitura mesmo com só `REVEAL` implementado, para que
-`BROKER`/`SESSION`/`LEASE`/`INJECT` sejam aditivos quando chegarem.
+`mode` already exists in the read contract even though only `REVEAL` is implemented, so that
+`BROKER`/`SESSION`/`LEASE`/`INJECT` can be added additively when they arrive.
 
-### Service Accounts, Auditoria e Gestão de Acesso (M9)
+### Service Accounts, Auditing, and Access Management (M9)
 
 ```text
-POST /api/v1/service-accounts                              cria a identidade de serviço
-POST /api/v1/service-accounts/{id}/tokens                  emite um token fv_sa_... (mostrado uma vez)
+POST /api/v1/service-accounts                              creates the service identity
+POST /api/v1/service-accounts/{id}/tokens                  issues an fv_sa_... token (shown once)
 POST /api/v1/service-accounts/{id}/tokens/{id}/revoke
 GET  /api/v1/service-accounts
 
-GET  /api/v1/audit                                         RBAC: AuditRead (checado em qualquer escopo)
+GET  /api/v1/audit                                         RBAC: AuditRead (checked at any scope)
 
-POST /api/v1/identities/{identityId}/role-assignments       RBAC: RoleAssignmentWrite no escopo concedido
-GET  /api/v1/identities/{identityId}/role-assignments        RBAC: RoleAssignmentWrite em qualquer escopo
-POST /api/v1/role-assignments/{id}/revoke                   RBAC: RoleAssignmentWrite no escopo do assignment
+POST /api/v1/identities/{identityId}/role-assignments       RBAC: RoleAssignmentWrite at the granted scope
+GET  /api/v1/identities/{identityId}/role-assignments        RBAC: RoleAssignmentWrite at any scope
+POST /api/v1/role-assignments/{id}/revoke                   RBAC: RoleAssignmentWrite at the assignment's scope
 ```
 
-Até o M8, conceder um `RoleAssignment` (dar acesso a alguém) exigia inserção direta no banco
-— o `POST /api/v1/identities/{id}/role-assignments` acima fecha esse gargalo. Só `Owner`/`Admin`
-concedem/revogam acesso (`Permission.RoleAssignmentWrite`); a concessão é idempotente por
-`(identidade, role, escopo)`.
+Up through M8, granting a `RoleAssignment` (giving someone access) required a direct database
+insert — the `POST /api/v1/identities/{id}/role-assignments` endpoint above closes that gap.
+Only `Owner`/`Admin` can grant/revoke access (`Permission.RoleAssignmentWrite`); the grant is
+idempotent per `(identity, role, scope)`.
 
 ### MCP Server
 
-Além do REST, ForgeVault expõe um servidor MCP nativo no mesmo processo, com a mesma
-autenticação (JWT humano ou token de serviço `fv_sa_...`):
+Besides REST, ForgeVault exposes a native MCP server in the same process, with the same
+authentication (human JWT or `fv_sa_...` service token):
 
 ```text
 POST /mcp   (Streamable HTTP, stateless)
 ```
 
-| Tool | Descrição |
+| Tool | Description |
 |---|---|
-| `secret.metadata` | metadados de um secret, nunca o valor |
-| `credential.request` | recupera o valor sob RBAC (hoje só `accessMode=REVEAL`); aceita `taskId`/`onBehalfOfAgent`/`runtimeSessionRef` como metadado de auditoria opcional — nunca como entrada de autorização |
-| `capability.check` | simula uma permissão sem executar nem revelar nada |
-| `admin.secret.create` / `update` / `rotate` / `revoke` | ciclo de vida completo de um secret |
-| `admin.audit.search` | busca na trilha de auditoria |
-| `admin.role.grant` / `revoke` (M9) | concede/revoga um `RoleAssignment` — mesma RBAC de `RoleAssignmentWrite` do endpoint REST equivalente |
-| `admin.agent.register` (M9) | **onboarding de agente em uma única chamada**: cria a `ServiceAccount`, emite seu token `fv_sa_...` e concede o role — ver "Registrando um agente" abaixo |
+| `secret.metadata` | a secret's metadata, never the value |
+| `credential.request` | retrieves the value under RBAC (currently only `accessMode=REVEAL`); accepts `taskId`/`onBehalfOfAgent`/`runtimeSessionRef` as optional audit metadata — never as authorization input |
+| `capability.check` | simulates a permission without executing or revealing anything |
+| `admin.secret.create` / `update` / `rotate` / `revoke` | full lifecycle of a secret |
+| `admin.audit.search` | searches the audit trail |
+| `admin.role.grant` / `revoke` (M9) | grants/revokes a `RoleAssignment` — same RBAC as the equivalent `RoleAssignmentWrite` REST endpoint |
+| `admin.agent.register` (M9) | **agent onboarding in a single call**: creates the `ServiceAccount`, issues its `fv_sa_...` token, and grants the role — see "Registering an agent" below |
 
-Toda tool reaproveita exatamente os mesmos serviços dos endpoints REST equivalentes — nenhuma
-lógica de autorização ou auditoria duplicada. Ver `docs/architecture/INTEGRATION_CONTRACT_MVP.md`
-para um exemplo de chamada completo.
+Every tool reuses exactly the same services as the equivalent REST endpoints — no duplicated
+authorization or auditing logic. See `docs/architecture/INTEGRATION_CONTRACT_MVP.md` for a
+complete example call.
 
-#### Registrando um agente (M9)
+#### Registering an agent (M9)
 
-Fluxo completo para um agente cadastrar, via MCP, as credenciais que já tem em mãos:
+Full flow for an agent to register, via MCP, the credentials it already has in hand:
 
 ```jsonc
-// 1. Um Owner/Admin registra o agente (identidade + token + acesso, em uma chamada):
+// 1. An Owner/Admin registers the agent (identity + token + access, in one call):
 {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
   "name":"admin.agent.register",
   "arguments":{"name":"agent-athos","scopeType":"Environment","scopeId":"<environment.id>"}
 }}
-// -> retorna {"token":"fv_sa_...", "role":"Agent", ...} — o token só aparece aqui, uma vez.
+// -> returns {"token":"fv_sa_...", "role":"Agent", ...} — the token appears only here, once.
 
-// 2. O agente usa SEU PRÓPRIO token pra cadastrar uma credencial que já tinha:
+// 2. The agent uses ITS OWN token to register a credential it already had:
 // Authorization: Bearer fv_sa_...
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
   "name":"admin.secret.create",
@@ -276,62 +277,63 @@ Fluxo completo para um agente cadastrar, via MCP, as credenciais que já tem em 
 }}
 ```
 
-O agente registrado nunca recebe `RoleAssignmentWrite` — não pode conceder acesso a si mesmo
-nem a mais ninguém; só quem já é Owner/Admin no escopo pode registrar novos agentes.
+A registered agent never receives `RoleAssignmentWrite` — it cannot grant access to itself
+or to anyone else; only someone who is already Owner/Admin at that scope can register new agents.
 
-## Segurança
+## Security
 
-- **Criptografia:** envelope encryption AES-256-GCM; a Master Key nunca vive no banco, no
-  repositório ou em variável de ambiente sem proteção — só em arquivo com permissão restrita.
-- **RBAC:** `RoleAssignment(identity_id, role, scope_type, scope_id)` com herança
-  Organization → Project → Environment; matriz papel→permissão em
+- **Cryptography:** AES-256-GCM envelope encryption; the Master Key never lives in the
+  database, the repository, or an unprotected environment variable — only in a file with
+  restricted permissions.
+- **RBAC:** `RoleAssignment(identity_id, role, scope_type, scope_id)` with
+  Organization → Project → Environment inheritance; the role→permission matrix lives in
   `ForgeVault.Infrastructure/Authorization/RolePermissions.cs`.
-- **Auditoria:** `AuditLog` append-only, nunca contém valor de secret — verificado por testes
-  que capturam toda saída de log da aplicação durante os cenários de RBAC/reveal.
-- **MFA:** TOTP obrigatório apenas para contas que optaram por habilitá-lo, aplicado hoje na
-  leitura de valor de secret.
+- **Auditing:** `AuditLog` is append-only and never contains a secret value — verified by
+  tests that capture all of the application's log output during RBAC/reveal scenarios.
+- **MFA:** TOTP is mandatory only for accounts that opted in to enable it, currently enforced
+  on secret value reads.
 
-## Testes
+## Tests
 
 ```bash
 dotnet test ForgeVault.slnx
 ```
 
-| Suite | Foco |
+| Suite | Focus |
 |---|---|
-| `Unit` | criptografia, permissões — isolado, sem I/O |
-| `Integration` | round-trip real contra Postgres |
-| `Security` | RBAC, IDOR, escalonamento de privilégio, ausência de vazamento em log/auditoria |
-| `E2E` | fluxos completos via `WebApplicationFactory` — autenticação, MFA, Service Accounts, MCP |
+| `Unit` | cryptography, permissions — isolated, no I/O |
+| `Integration` | real round-trip against Postgres |
+| `Security` | RBAC, IDOR, privilege escalation, absence of leaks in logs/auditing |
+| `E2E` | complete flows via `WebApplicationFactory` — authentication, MFA, Service Accounts, MCP |
 
-CI (`.github/workflows/ci.yml`) builda e roda a suíte completa contra um Postgres 17 real a
-cada push/PR.
+CI (`.github/workflows/ci.yml`) builds and runs the full suite against a real Postgres 17
+on every push/PR.
 
-## Estado do projeto
+## Project status
 
-**Onda 1 (MVP)** completa — scaffold, criptografia, autenticação/MFA, Secrets CRUD,
-RBAC/auditoria, rotação/expiração, Service Accounts e backup/restore. **Onda 2, M8** completa
-— MCP Server nativo e o contrato de contexto ForgeHub/ForgeRouter fechado. **M9** completa —
-gestão de `RoleAssignment` via API/MCP e onboarding de agente em uma chamada, fechando o
-gargalo de concessão de acesso que antes exigia inserção direta no banco. **Dashboard
-(`ForgeVault.Web`)** completo — primeira UI do projeto, ver seção acima. Detalhe marco a
-marco em `docs/architecture/IMPLEMENTATION_READINESS.md`.
+**Wave 1 (MVP)** complete — scaffold, cryptography, authentication/MFA, Secrets CRUD,
+RBAC/auditing, rotation/expiration, Service Accounts, and backup/restore. **Wave 2, M8**
+complete — native MCP Server and the ForgeHub/ForgeRouter context contract finalized. **M9**
+complete — `RoleAssignment` management via API/MCP and single-call agent onboarding, closing
+the access-granting gap that previously required a direct database insert. **Dashboard
+(`ForgeVault.Web`)** complete — the project's first UI, see section above. Milestone-by-
+milestone detail in `docs/architecture/IMPLEMENTATION_READINESS.md`.
 
-Fora do escopo atual, por decisão explícita (não esquecimento) — ver
-`docs/architecture/IMPLEMENTATION_READINESS.md` §6: dynamic secrets/leases, KMS/HSM real,
-SSO/OIDC/LDAP, break-glass e quorum de aprovação, multi-tenant avançado, HA/Kubernetes.
+Out of scope for now, by explicit decision (not an oversight) — see
+`docs/architecture/IMPLEMENTATION_READINESS.md` §6: dynamic secrets/leases, a real KMS/HSM,
+SSO/OIDC/LDAP, break-glass and approval quorum, advanced multi-tenancy, HA/Kubernetes.
 
-## Documentação
+## Documentation
 
-| Documento | Conteúdo |
+| Document | Contents |
 |---|---|
-| [`docs/README.md`](docs/README.md) | índice e hierarquia de autoridade da documentação |
-| [`docs/specs/PRD.md`](docs/specs/PRD.md) / [`SPEC.md`](docs/specs/SPEC.md) | visão e especificação baseline |
-| [`docs/architecture/TARGET_ARCHITECTURE.md`](docs/architecture/TARGET_ARCHITECTURE.md) | arquitetura-alvo |
-| [`docs/architecture/IMPLEMENTATION_READINESS.md`](docs/architecture/IMPLEMENTATION_READINESS.md) | ordem de implementação e marcos de engenharia |
-| [`docs/architecture/INTEGRATION_CONTRACT_MVP.md`](docs/architecture/INTEGRATION_CONTRACT_MVP.md) | contrato de integração REST + MCP para ForgeHub/ForgeRouter |
-| [`docs/modules/`](docs/modules/) | spec de cada módulo implementável |
+| [`docs/README.md`](docs/README.md) | index and documentation authority hierarchy |
+| [`docs/specs/PRD.md`](docs/specs/PRD.md) / [`SPEC.md`](docs/specs/SPEC.md) | vision and baseline specification |
+| [`docs/architecture/TARGET_ARCHITECTURE.md`](docs/architecture/TARGET_ARCHITECTURE.md) | target architecture |
+| [`docs/architecture/IMPLEMENTATION_READINESS.md`](docs/architecture/IMPLEMENTATION_READINESS.md) | implementation order and engineering milestones |
+| [`docs/architecture/INTEGRATION_CONTRACT_MVP.md`](docs/architecture/INTEGRATION_CONTRACT_MVP.md) | REST + MCP integration contract for ForgeHub/ForgeRouter |
+| [`docs/modules/`](docs/modules/) | spec for each implementable module |
 
 ---
 
-<p align="center"><sub>Parte do ecossistema Darckware — sibling de <strong>ForgeHub</strong> e <strong>ForgeRouter</strong>.</sub></p>
+<p align="center"><sub>Part of the Darckware ecosystem — sibling of <strong>ForgeHub</strong> and <strong>ForgeRouter</strong>.</sub></p>
