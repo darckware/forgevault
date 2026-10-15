@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import type { ServiceAccountResponse, ServiceAccountTokenResponse } from "@/types/api";
 
 export function useServiceAccounts() {
@@ -27,6 +27,16 @@ export function useCreateServiceAccount() {
 export function useIssueServiceAccountToken(serviceAccountId: string) {
   return useMutation({
     mutationFn: () => apiPost<ServiceAccountTokenResponse>(`/api/v1/service-accounts/${serviceAccountId}/tokens`),
+  });
+}
+
+// Hard delete: the backend revokes every role, secret grant and MCP assignment the identity
+// holds (audited) and removes its tokens with it. Meant for a retired agent/service.
+export function useDeleteServiceAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<void>(`/api/v1/service-accounts/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["service-accounts"] }),
   });
 }
 

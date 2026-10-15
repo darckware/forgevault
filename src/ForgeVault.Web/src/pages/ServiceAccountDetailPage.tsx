@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
-import { KeyRound, ShieldOff } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { KeyRound, ShieldOff, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -10,7 +10,13 @@ import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { formatDateTime } from "@/lib/format";
-import { useIssueServiceAccountToken, useRevokeServiceAccountToken, useServiceAccount } from "@/hooks/useServiceAccounts";
+import {
+  useDeleteServiceAccount,
+  useIssueServiceAccountToken,
+  useRevokeServiceAccountToken,
+  useServiceAccount,
+} from "@/hooks/useServiceAccounts";
+import { ApiError } from "@/lib/api";
 
 interface IssuedToken {
   tokenId: string;
@@ -30,6 +36,27 @@ export function ServiceAccountDetailPage() {
   const revokeToken = useRevokeServiceAccountToken(saId!);
   const [sessionTokens, setSessionTokens] = useState<IssuedToken[]>([]);
   const [freshToken, setFreshToken] = useState<{ token: string; tokenPrefix: string } | null>(null);
+  const deleteAccount = useDeleteServiceAccount();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  const handleDelete = async () => {
+    if (!account) return;
+    if (
+      !confirm(
+        `Permanently delete "${account.name}"? Its tokens stop working and every role, secret grant and MCP assignment it holds is revoked. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleteError(null);
+    try {
+      await deleteAccount.mutateAsync(account.id);
+      navigate("/service-accounts");
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? (err.body?.error ?? err.message) : "Failed to delete");
+    }
+  };
 
   const handleIssue = async () => {
     const result = await issueToken.mutateAsync();
@@ -53,13 +80,22 @@ export function ServiceAccountDetailPage() {
     <div className="flex flex-col gap-6">
       <Breadcrumbs items={[{ label: "Service Accounts", to: "/service-accounts" }, { label: account.name }]} />
 
-      <Card title="Service Account">
+      <Card
+        title="Service Account"
+        actions={
+          <Button size="sm" variant="danger" onClick={handleDelete} isLoading={deleteAccount.isPending}>
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
+        }
+      >
         <div className="flex items-center gap-3">
           <span className="text-lg font-medium text-slate-100">{account.name}</span>
         </div>
         <div className="mt-2">
           <MonoId label="Identity id" value={account.id} truncate={false} />
         </div>
+        {deleteError && <p className="mt-2 text-sm text-vault-danger">{deleteError}</p>}
       </Card>
 
       <Card
