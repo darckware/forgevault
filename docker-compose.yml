@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: forgevault
       POSTGRES_PASSWORD: forgevault_dev_only
@@ -22,6 +23,7 @@ services:
 
   redis:
     image: redis:8
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
       - "[::1]:6379:6379"
@@ -39,6 +41,7 @@ services:
         FORGEVAULT_VERSION: ${FORGEVAULT_VERSION:-unknown}
         FORGEVAULT_GIT_SHA: ${FORGEVAULT_GIT_SHA:-unknown}
         FORGEVAULT_BUILD_DATE: ${FORGEVAULT_BUILD_DATE:-unknown}
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +74,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_RECAPTCHA_SITE_KEY: ${RECAPTCHA_SITE_KEY:-}
+    restart: unless-stopped
     depends_on:
       - api
     # Bound to 127.0.0.1 only (never 0.0.0.0) — same "localhost only" requirement as `api`
