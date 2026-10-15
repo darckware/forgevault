@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Table } from "@/components/ui/Table";
@@ -14,7 +14,7 @@ import { MonoId } from "@/components/ui/MonoId";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatDateTime } from "@/lib/format";
-import { useCreateServiceAccount, useServiceAccounts } from "@/hooks/useServiceAccounts";
+import { useCreateServiceAccount, useDeleteServiceAccount, useServiceAccounts } from "@/hooks/useServiceAccounts";
 import { ApiError } from "@/lib/api";
 import type { ServiceAccountResponse } from "@/types/api";
 
@@ -27,6 +27,17 @@ export function ServiceAccountsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const deleteAccount = useDeleteServiceAccount();
+
+  const onDelete = (a: ServiceAccountResponse) => {
+    if (
+      confirm(
+        `Permanently delete "${a.name}"? Its tokens stop working and every role, secret grant and MCP assignment it holds is revoked. This cannot be undone.`,
+      )
+    ) {
+      deleteAccount.mutate(a.id);
+    }
+  };
 
   const {
     register,
@@ -70,6 +81,24 @@ export function ServiceAccountsPage() {
             { key: "id", header: "Identity id", render: (a) => <MonoId value={a.id} /> },
             { key: "isActive", header: "Status", render: (a) => <Badge tone={a.isActive ? "success" : "neutral"}>{a.isActive ? "Active" : "Inactive"}</Badge> },
             { key: "createdAt", header: "Created", render: (a) => formatDateTime(a.createdAt) },
+            {
+              key: "actions",
+              header: "",
+              render: (a) => (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  isLoading={deleteAccount.isPending && deleteAccount.variables === a.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(a);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </Button>
+              ),
+            },
           ]}
         />
       )}

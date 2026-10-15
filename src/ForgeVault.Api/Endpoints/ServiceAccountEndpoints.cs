@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using ForgeVault.Api.Auditing;
+using ForgeVault.Application.Authorization;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Auth;
 using ForgeVault.Infrastructure.Persistence;
@@ -102,6 +103,70 @@ public static class ServiceAccountEndpoints
             token.RevokedAt ??= DateTimeOffset.UtcNow;
             db.AuditLogs.Add(AuditLogFactory.Create(
                 user.GetUserId(), user.GetActorType(), "TOKEN_REVOKED", "service_account", id, http.TraceIdentifier));
+            await db.SaveChangesAsync(ct);
+
+            return Results.NoContent();
+        });
+
+        // Hard delete of a retired agent/service identity (2026-10-14, Marcelo: "altere o
+        // sistema para permitir a exclusão dos serviços no forgevault. preciso excluir o
+        // vector"). Mirrors UserEndpoints' DELETE: gated by UserManage (identity management,
+        // Owner/Admin), an actor can't delete itself, and every grant the identity holds is
+        // revoked first with its own audited action — RoleAssignment, SecretAccessGrant and
+        // McpServerAssignment all point at the identity by a soft IdentityId (no FK), so a
+        // bare row delete would leave live-looking grants for an identity that no longer
+        // exists. Its tokens go with the row (FK cascade); the audit trail stays.
+        group.MapDelete("/{id:guid}", async (
+            Guid id,
+            ForgeVaultDbContext db,
+            IPermissionChecker permissions,
+            ClaimsPrincipal user,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            var callerId = user.GetUserId();
+            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
+            {
+                return Results.Forbid();
+            }
+
+            var account = await db.ServiceAccounts.FindAsync([id], ct);
+            if (account is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (id == callerId)
+            {
+                return Results.Json(new ErrorResponse("cannot_delete_self"), statusCode: StatusCodes.Status409Conflict);
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var actorType = user.GetActorType();
+
+            var roles = await db.RoleAssignments.Where(r => r.IdentityId == id && r.RevokedAt == null).ToListAsync(ct);
+            foreach (var assignment in roles)
+            {
+                assignment.RevokedAt = now;
+                db.AuditLogs.Add(AuditLogFactory.Create(callerId, actorType, "ACCESS_REVOKED", "role_assignment", assignment.Id, http.TraceIdentifier));
+            }
+
+            var grants = await db.SecretAccessGrants.Where(g => g.IdentityId == id && g.RevokedAt == null).ToListAsync(ct);
+            foreach (var grant in grants)
+            {
+                grant.RevokedAt = now;
+                db.AuditLogs.Add(AuditLogFactory.Create(callerId, actorType, "SECRET_ACCESS_REVOKED", "secret_access_grant", grant.Id, http.TraceIdentifier));
+            }
+
+            var mcpAssignments = await db.McpServerAssignments.Where(m => m.IdentityId == id && m.RevokedAt == null).ToListAsync(ct);
+            foreach (var assignment in mcpAssignments)
+            {
+                assignment.RevokedAt = now;
+                db.AuditLogs.Add(AuditLogFactory.Create(callerId, actorType, "MCP_SERVER_ASSIGNMENT_REVOKED", "mcp_server_assignment", assignment.Id, http.TraceIdentifier));
+            }
+
+            db.ServiceAccounts.Remove(account);
+            db.AuditLogs.Add(AuditLogFactory.Create(callerId, actorType, "SERVICE_ACCOUNT_DELETED", "service_account", account.Id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
             return Results.NoContent();
