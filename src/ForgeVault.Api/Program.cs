@@ -1,3 +1,4 @@
+using ForgeVault.Api;
 using ForgeVault.Api.Authentication;
 using ForgeVault.Api.Authorization;
 using ForgeVault.Api.Endpoints;
@@ -129,6 +130,13 @@ var app = builder.Build();
 // ValidateOnStart above: don't start accepting traffic in a broken state
 // (LocalFileKeyProvider's constructor throws if the file is absent or not permission 600).
 app.Services.GetRequiredService<IKeyManagementProvider>();
+
+// Host-local provisioning (no HTTP route) -- see HostBootstrap for why this is safe.
+if (args.Length > 0 && args[0] == HostBootstrap.Command)
+{
+    System.Environment.ExitCode = await HostBootstrap.RunAsync(args[1..], app.Services);
+    return;
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
