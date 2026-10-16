@@ -45,7 +45,7 @@ public sealed class ServiceAccountDeleteTests(LoggingWebApplicationFactory facto
         Assert.True(await db.AuditLogs.AnyAsync(l => l.Action == "SERVICE_ACCOUNT_DELETED" && l.ResourceId == accountId));
     }
 
-    private async Task<Guid> GrantOwnerAtNewOrganizationAsync(HttpClient owner, Guid ownerId)
+    internal async Task<Guid> GrantOwnerAtNewOrganizationAsync(HttpClient owner, Guid ownerId)
     {
         var orgResponse = await owner.PostAsJsonAsync("/api/v1/organizations", new
         {
@@ -73,7 +73,7 @@ public sealed class ServiceAccountDeleteTests(LoggingWebApplicationFactory facto
         await db.SaveChangesAsync();
     }
 
-    private async Task<(HttpClient Client, Guid UserId)> CreateAuthenticatedClientAsync()
+    internal async Task<(HttpClient Client, Guid UserId)> CreateAuthenticatedClientAsync()
     {
         var email = $"user-{Guid.NewGuid():N}@example.test";
         const string password = "correct horse battery staple";
@@ -106,7 +106,14 @@ public sealed class ServiceAccountDeleteTests(LoggingWebApplicationFactory facto
 
     private sealed record LoginResponseDto(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt);
 
-    private sealed record IdResponse(Guid Id);
+    internal sealed record IdResponse(Guid Id);
+
+    internal async Task<Guid> TokenIdForAsync(Guid accountId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        return await db.ServiceAccountTokens.Where(t => t.ServiceAccountId == accountId).Select(t => t.Id).SingleAsync();
+    }
 
     private sealed record UserDto(Guid Id, string Email, bool MfaEnabled, bool IsActive, DateTimeOffset CreatedAt);
 }

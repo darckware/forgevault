@@ -18,13 +18,25 @@ public static class ServiceAccountEndpoints
     {
         var group = app.MapGroup("/api/v1/service-accounts").RequireAuthorization();
 
+        // Creating an identity and minting its tokens are identity management: gated by
+        // UserManage (Owner/Admin), like DELETE below. Until 2026-10-16 both were
+        // [Authorize]-only, so ANY authenticated identity -- any agent's fv_sa_ token --
+        // could mint a token for another service account and act with that account's
+        // roles (e.g. read every secret an agent's role reaches). Host provisioning uses
+        // the local `host-bootstrap` command instead (HostBootstrap.cs).
         group.MapPost("/", async (
             CreateServiceAccountRequest request,
             ForgeVaultDbContext db,
+            IPermissionChecker permissions,
             ClaimsPrincipal user,
             HttpContext http,
             CancellationToken ct) =>
         {
+            if (!await permissions.HasPermissionAnywhereAsync(user.GetUserId(), Permission.UserManage, ct))
+            {
+                return Results.Forbid();
+            }
+
             if (await db.ServiceAccounts.AnyAsync(s => s.Name == request.Name, ct))
             {
                 return Results.Conflict(new ErrorResponse("service_account_name_taken"));
@@ -57,10 +69,16 @@ public static class ServiceAccountEndpoints
         group.MapPost("/{id:guid}/tokens", async (
             Guid id,
             ForgeVaultDbContext db,
+            IPermissionChecker permissions,
             ClaimsPrincipal user,
             HttpContext http,
             CancellationToken ct) =>
         {
+            if (!await permissions.HasPermissionAnywhereAsync(user.GetUserId(), Permission.UserManage, ct))
+            {
+                return Results.Forbid();
+            }
+
             var account = await db.ServiceAccounts.FindAsync([id], ct);
             if (account is null)
             {
@@ -85,14 +103,23 @@ public static class ServiceAccountEndpoints
             return Results.Ok(new ServiceAccountTokenResponse(rawToken, token.TokenPrefix, token.IssuedAt));
         });
 
+        // Revoking is allowed to identity admins and to the account itself (an identity
+        // can always retire its own tokens); never to an unrelated identity.
         group.MapPost("/{id:guid}/tokens/{tokenId:guid}/revoke", async (
             Guid id,
             Guid tokenId,
             ForgeVaultDbContext db,
+            IPermissionChecker permissions,
             ClaimsPrincipal user,
             HttpContext http,
             CancellationToken ct) =>
         {
+            var callerId = user.GetUserId();
+            if (callerId != id && !await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
+            {
+                return Results.Forbid();
+            }
+
             var token = await db.ServiceAccountTokens
                 .SingleOrDefaultAsync(t => t.Id == tokenId && t.ServiceAccountId == id, ct);
             if (token is null)
