@@ -4,7 +4,7 @@ using System.Net.Http.Json;
 using ForgeVault.Application.Auth;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
+using ForgeVault.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -14,7 +14,7 @@ namespace ForgeVault.E2E.Tests;
 // service:forgehub identity can authenticate, and a service:forgerouter identity can
 // fetch a credential value under RBAC — the two remaining §62 acceptance criteria
 // ("ForgeHub consegue autenticar", "ForgeRouter consegue recuperar credencial").
-public sealed class ServiceAccountIntegrationTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ServiceAccountIntegrationTests(IsolatedWebApplicationFactory factory) : IClassFixture<IsolatedWebApplicationFactory>
 {
     [Fact]
     public async Task ServiceAccount_AuthenticatesWithBearerToken_AndRejectsAnInvalidOne()
@@ -119,10 +119,19 @@ public sealed class ServiceAccountIntegrationTests(WebApplicationFactory<Program
     private async Task<(Guid ServiceAccountId, string RawToken)> CreateServiceAccountWithTokenAsync(
         (HttpClient Client, Guid UserId) admin, string name)
     {
+        var orgResponse = await admin.Client.PostAsJsonAsync("/api/v1/organizations", new
+        {
+            name = $"service-test-{Guid.NewGuid():N}",
+            slug = $"service-test-{Guid.NewGuid():N}",
+        });
+        var organization = await orgResponse.Content.ReadFromJsonAsync<IdResponse>();
+        await GrantRoleAsync(admin.UserId, Role.Owner, RoleScopeType.Organization, organization!.Id);
+
         var createResponse = await admin.Client.PostAsJsonAsync(
             "/api/v1/service-accounts", new { name = $"{name}-{Guid.NewGuid():N}" });
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var account = await createResponse.Content.ReadFromJsonAsync<IdResponse>();
+        await GrantRoleAsync(account!.Id, Role.Agent, RoleScopeType.Organization, organization.Id);
 
         var tokenResponse = await admin.Client.PostAsync($"/api/v1/service-accounts/{account!.Id}/tokens", content: null);
         Assert.Equal(HttpStatusCode.OK, tokenResponse.StatusCode);

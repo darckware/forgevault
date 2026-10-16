@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using ForgeVault.Api.Auditing;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Domain.Entities;
@@ -8,22 +9,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ForgeVault.Api.Endpoints;
 
-// docs/ForgeVault.md §31-32, §76 (M7). Like Organization creation, provisioning a Service
-// Account has no natural parent scope to inherit RBAC from — it's a platform-level identity,
-// not owned by one Organization — so this is [Authorize]-only for now, same documented gap
-// as OrganizationEndpoints. A real governance/admin surface for this is future work.
+// docs/ForgeVault.md §31-32, §76 (M7). A Service Account is a platform-level identity;
+// its active role assignments determine which scopes it can reach.
 public static class ServiceAccountEndpoints
 {
     public static void MapServiceAccountEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/v1/service-accounts").RequireAuthorization();
 
-        // Creating an identity and minting its tokens are identity management: gated by
-        // UserManage (Owner/Admin), like DELETE below. Until 2026-10-16 both were
-        // [Authorize]-only, so ANY authenticated identity -- any agent's fv_sa_ token --
-        // could mint a token for another service account and act with that account's
-        // roles (e.g. read every secret an agent's role reaches). Host provisioning uses
-        // the local `host-bootstrap` command instead (HostBootstrap.cs).
+        // Account creation requires UserManage. Host provisioning uses the local
+        // `host-bootstrap` command instead (HostBootstrap.cs).
         group.MapPost("/", async (
             CreateServiceAccountRequest request,
             ForgeVaultDbContext db,
@@ -64,6 +59,7 @@ public static class ServiceAccountEndpoints
             return Results.Ok(accounts.Select(ToResponse));
         });
 
+        // Minting requires UserManage across every role, direct grant and MCP scope.
         // Issues a brand-new token — the raw value is returned exactly once
         // (docs/ForgeVault.md §115), same discipline as MFA enrollment (M6).
         group.MapPost("/{id:guid}/tokens", async (
@@ -74,15 +70,15 @@ public static class ServiceAccountEndpoints
             HttpContext http,
             CancellationToken ct) =>
         {
-            if (!await permissions.HasPermissionAnywhereAsync(user.GetUserId(), Permission.UserManage, ct))
-            {
-                return Results.Forbid();
-            }
-
             var account = await db.ServiceAccounts.FindAsync([id], ct);
             if (account is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await CanManageAccountAsync(db, permissions, user.GetUserId(), id, ct))
+            {
+                return Results.Forbid();
             }
 
             var rawToken = ServiceAccountTokenFactory.GenerateRawToken();
@@ -103,7 +99,7 @@ public static class ServiceAccountEndpoints
             return Results.Ok(new ServiceAccountTokenResponse(rawToken, token.TokenPrefix, token.IssuedAt));
         });
 
-        // Revoking is allowed to identity admins and to the account itself (an identity
+        // Revoking is allowed to in-scope identity admins and to the account itself (an identity
         // can always retire its own tokens); never to an unrelated identity.
         group.MapPost("/{id:guid}/tokens/{tokenId:guid}/revoke", async (
             Guid id,
@@ -115,7 +111,7 @@ public static class ServiceAccountEndpoints
             CancellationToken ct) =>
         {
             var callerId = user.GetUserId();
-            if (callerId != id && !await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
+            if (callerId != id && !await CanManageAccountAsync(db, permissions, callerId, id, ct))
             {
                 return Results.Forbid();
             }
@@ -137,8 +133,8 @@ public static class ServiceAccountEndpoints
 
         // Hard delete of a retired agent/service identity (2026-10-14, Marcelo: "altere o
         // sistema para permitir a exclusão dos serviços no forgevault. preciso excluir o
-        // vector"). Mirrors UserEndpoints' DELETE: gated by UserManage (identity management,
-        // Owner/Admin), an actor can't delete itself, and every grant the identity holds is
+        // vector"). Requires UserManage in every active account scope; an actor can't delete
+        // itself, and every grant the identity holds is
         // revoked first with its own audited action — RoleAssignment, SecretAccessGrant and
         // McpServerAssignment all point at the identity by a soft IdentityId (no FK), so a
         // bare row delete would leave live-looking grants for an identity that no longer
@@ -152,15 +148,15 @@ public static class ServiceAccountEndpoints
             CancellationToken ct) =>
         {
             var callerId = user.GetUserId();
-            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
-            {
-                return Results.Forbid();
-            }
-
             var account = await db.ServiceAccounts.FindAsync([id], ct);
             if (account is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await CanManageAccountAsync(db, permissions, callerId, id, ct))
+            {
+                return Results.Forbid();
             }
 
             if (id == callerId)
@@ -202,6 +198,94 @@ public static class ServiceAccountEndpoints
 
     private static ServiceAccountResponse ToResponse(ServiceAccount account) => new(
         account.Id, account.Name, account.IsActive, account.CreatedAt);
+
+    // A token grants the account's roles, direct secret grants and MCP assignments.
+    // The caller must administer every active scope those access paths reach.
+    private static async Task<bool> CanManageAccountAsync(
+        ForgeVaultDbContext db, IPermissionChecker permissions, Guid callerId, Guid accountId, CancellationToken ct)
+    {
+        var assignments = await db.RoleAssignments
+            .Where(r => r.IdentityId == accountId && r.RevokedAt == null)
+            .Select(r => new { r.ScopeType, r.ScopeId })
+            .ToListAsync(ct);
+
+        var hasScope = false;
+
+        foreach (var assignment in assignments)
+        {
+            hasScope = true;
+            var scope = await RoleAssignmentScopeResolver.ResolveAsync(db, assignment.ScopeType, assignment.ScopeId, ct);
+            if (scope is null || !await permissions.HasPermissionAsync(callerId, Permission.UserManage, scope, ct))
+            {
+                return false;
+            }
+        }
+
+        var secretIds = await db.SecretAccessGrants
+            .Where(g => g.IdentityId == accountId && g.RevokedAt == null)
+            .Select(g => g.SecretId)
+            .ToListAsync(ct);
+        foreach (var secretId in secretIds)
+        {
+            hasScope = true;
+            var secret = await SecretScopeResolver.ResolveWithScopeAsync(db, secretId, ct);
+            if (secret is null || !await permissions.HasPermissionAsync(callerId, Permission.UserManage, secret.Value.Scope, ct))
+            {
+                return false;
+            }
+        }
+
+        var mcpAssignments = await db.McpServerAssignments
+            .Where(a => a.IdentityId == accountId && a.RevokedAt == null)
+            .Select(a => new { OrganizationId = a.McpServerDefinition!.OrganizationId, a.ParamValuesJson })
+            .ToListAsync(ct);
+        foreach (var assignment in mcpAssignments)
+        {
+            hasScope = true;
+            if (!await permissions.HasPermissionAsync(callerId, Permission.UserManage,
+                    new ResourceScope(assignment.OrganizationId, null, null), ct))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var parameters = JsonDocument.Parse(assignment.ParamValuesJson);
+                if (parameters.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return false;
+                }
+
+                foreach (var parameter in parameters.RootElement.EnumerateObject())
+                {
+                    if (parameter.Value.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+                    if (!parameter.Value.TryGetProperty("secretId", out var secretIdValue))
+                    {
+                        continue;
+                    }
+                    if (secretIdValue.ValueKind != JsonValueKind.String ||
+                        !Guid.TryParse(secretIdValue.GetString(), out var secretId))
+                    {
+                        return false;
+                    }
+                    var secret = await SecretScopeResolver.ResolveWithScopeAsync(db, secretId, ct);
+                    if (secret is null || !await permissions.HasPermissionAsync(callerId, Permission.UserManage, secret.Value.Scope, ct))
+                    {
+                        return false;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        return hasScope;
+    }
 }
 
 public sealed record CreateServiceAccountRequest(string Name);

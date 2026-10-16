@@ -19,11 +19,10 @@ public enum Permission
     // M10 (docs/modules/11_MCP_REGISTRY.md) — manage the MCP server catalog and assignments.
     McpRegistryWrite,
 
-    // M13 — create/list/deactivate human User accounts (UserEndpoints.cs). Not scoped to an
-    // Organization/Project/Environment (a User isn't owned by one — RoleAssignment is what
-    // ties a User to a scope), so it's only ever checked with HasPermissionAnywhereAsync,
-    // same convention as AuditRead/RoleAssignmentWrite for other cross-cutting governance
-    // actions. Before this, the only way to create a human account was a direct INSERT
+    // M13 — create/list/deactivate human User accounts (UserEndpoints.cs). A User isn't
+    // owned by one Organization; service-account token operations instead check
+    // UserManage against every active role scope of the target account. Before this,
+    // the only way to create a human account was a direct INSERT
     // against the database (same gap RoleAssignmentWrite closed for role grants in M9).
     UserManage,
 }

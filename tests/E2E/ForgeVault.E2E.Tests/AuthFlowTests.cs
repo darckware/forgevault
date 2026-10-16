@@ -4,7 +4,7 @@ using System.Net.Http.Json;
 using ForgeVault.Application.Auth;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
+using ForgeVault.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeVault.E2E.Tests;
@@ -13,7 +13,7 @@ namespace ForgeVault.E2E.Tests;
 // logs in, receives a JWT, calls an authenticated placeholder endpoint, and gets 401
 // without a token. Also exercises the refresh-token rotation + reuse-detection invariant
 // from docs/modules/02_IDENTITY_AND_AUTHENTICATION.md §4.
-public sealed class AuthFlowTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class AuthFlowTests(IsolatedWebApplicationFactory factory) : IClassFixture<IsolatedWebApplicationFactory>
 {
     [Fact]
     public async Task Login_ThenAuthenticatedCall_Succeeds_AndFailsWithoutAToken()

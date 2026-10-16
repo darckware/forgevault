@@ -4,7 +4,7 @@ using System.Net.Http.Json;
 using ForgeVault.Application.Auth;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
+using ForgeVault.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +13,7 @@ namespace ForgeVault.Api.IntegrationTests;
 // docs/architecture/IMPLEMENTATION_READINESS.md, milestone M6 "done when": rotating a
 // secret produces version N+1 while N remains readable via /versions; reading an expired
 // secret is denied and audited as a denial.
-public sealed class SecretRotationAndExpirationTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class SecretRotationAndExpirationTests(IsolatedWebApplicationFactory factory) : IClassFixture<IsolatedWebApplicationFactory>
 {
     [Fact]
     public async Task Rotate_CreatesNewVersion_OldVersionStaysReadable_AuditedAsRotate()

@@ -24,8 +24,8 @@ public sealed class ServiceAccountDeleteTests(LoggingWebApplicationFactory facto
         var created = await owner.PostAsJsonAsync("/api/v1/service-accounts", new { name = $"retired-{Guid.NewGuid():N}" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var accountId = (await created.Content.ReadFromJsonAsync<IdResponse>())!.Id;
-        Assert.Equal(HttpStatusCode.OK, (await owner.PostAsync($"/api/v1/service-accounts/{accountId}/tokens", null)).StatusCode);
         await GrantRoleAsync(accountId, Role.Developer, organizationId);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PostAsync($"/api/v1/service-accounts/{accountId}/tokens", null)).StatusCode);
 
         var deniedResponse = await stranger.DeleteAsync($"/api/v1/service-accounts/{accountId}");
         Assert.Equal(HttpStatusCode.Forbidden, deniedResponse.StatusCode);

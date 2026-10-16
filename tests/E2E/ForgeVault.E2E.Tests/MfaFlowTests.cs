@@ -5,7 +5,7 @@ using ForgeVault.Application.Auth;
 using ForgeVault.Application.Security;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
+using ForgeVault.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +13,7 @@ namespace ForgeVault.E2E.Tests;
 
 // docs/architecture/IMPLEMENTATION_READINESS.md, milestone M6 "done when": TOTP enrollment
 // + login-with-MFA works end to end.
-public sealed class MfaFlowTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class MfaFlowTests(IsolatedWebApplicationFactory factory) : IClassFixture<IsolatedWebApplicationFactory>
 {
     [Fact]
     public async Task EnrollVerifyAndLoginWithMfa_Succeeds_AndBlocksLoginWithoutOrWithWrongCode()

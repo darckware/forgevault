@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\ForgeVault.Api\ForgeVault.Api.csproj" />
+    <Compile Include="..\..\TestSupport\IsolatedTestDatabase.cs" Link="IsolatedTestDatabase.cs" />
   </ItemGroup>
 
 </Project>

@@ -4,7 +4,7 @@ using System.Text.Json;
 using ForgeVault.Application.Auth;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
+using ForgeVault.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -16,7 +16,7 @@ namespace ForgeVault.E2E.Tests;
 // RbacRevealAuditTests (ForgeVault.Security.Tests) — authorized calls succeed and audit,
 // unauthorized calls are denied and still audit, and no response or audit row ever leaks a
 // secret value.
-public sealed class McpToolsTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class McpToolsTests(IsolatedWebApplicationFactory factory) : IClassFixture<IsolatedWebApplicationFactory>
 {
     [Fact]
     public async Task ToolsList_ReturnsAllPlannedTools()

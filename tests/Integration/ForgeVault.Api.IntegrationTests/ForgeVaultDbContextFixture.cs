@@ -1,20 +1,18 @@
 using ForgeVault.Infrastructure.Persistence;
+using ForgeVault.TestSupport;
 using Microsoft.EntityFrameworkCore;
 
 namespace ForgeVault.Api.IntegrationTests;
 
-// Points at the same Postgres instance started by `docker compose up -d postgres`
-// (docker-compose.yml, host port 5435) — see docs/architecture/IMPLEMENTATION_READINESS.md
-// milestone M1. Override FORGEVAULT_TEST_CONNECTION to point elsewhere (e.g. CI).
+// Uses a dedicated database on the Postgres instance started by docker compose
+// (host port 5435). FORGEVAULT_TEST_CONNECTION may override only with a *_test database.
 public sealed class ForgeVaultDbContextFixture : IDisposable
 {
     public ForgeVaultDbContext Db { get; }
 
     public ForgeVaultDbContextFixture()
     {
-        var connectionString =
-            System.Environment.GetEnvironmentVariable("FORGEVAULT_TEST_CONNECTION")
-            ?? "Host=localhost;Port=5435;Database=forgevault;Username=forgevault;Password=forgevault_dev_only";
+        var connectionString = IsolatedTestDatabase.Prepare("forgevault_integration_test");
 
         var options = new DbContextOptionsBuilder<ForgeVaultDbContext>()
             .UseNpgsql(connectionString)

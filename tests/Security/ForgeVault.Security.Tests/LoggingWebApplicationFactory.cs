@@ -1,3 +1,4 @@
+using ForgeVault.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Logging;
@@ -11,8 +12,15 @@ public sealed class LoggingWebApplicationFactory : WebApplicationFactory<Program
 {
     public List<string> CapturedLogs { get; } = [];
 
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseSetting("ConnectionStrings:ForgeVault", IsolatedTestDatabase.Prepare("forgevault_security_test"));
         builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(CapturedLogs)));
+    }
+
+    internal static void ValidateTestConnection(string connectionString)
+    {
+        IsolatedTestDatabase.Validate(connectionString);
     }
 }

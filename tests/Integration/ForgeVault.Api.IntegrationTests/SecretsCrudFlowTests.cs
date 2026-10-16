@@ -5,7 +5,7 @@ using System.Text;
 using ForgeVault.Application.Auth;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Mvc.Testing;
+using ForgeVault.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,7 +15,7 @@ namespace ForgeVault.Api.IntegrationTests;
 // full org->project->environment->secret hierarchy over real HTTP, asserts the DB-level
 // ciphertext is not the plaintext, and a second PUT creates a new immutable version
 // without mutating the first one's row.
-public sealed class SecretsCrudFlowTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class SecretsCrudFlowTests(IsolatedWebApplicationFactory factory) : IClassFixture<IsolatedWebApplicationFactory>
 {
     [Fact]
     public async Task CreateFullHierarchyAndSecret_EncryptsAtRest_AndVersionsOnUpdate()
