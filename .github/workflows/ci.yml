@@ -29,7 +29,6 @@ jobs:
           --health-retries 10
 
     env:
-      FORGEVAULT_TEST_CONNECTION: "Host=localhost;Port=5435;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
       FORGEVAULT_CONNECTION: "Host=localhost;Port=5435;Database=forgevault;Username=forgevault;Password=forgevault_dev_only"
       # docs/architecture/IMPLEMENTATION_READINESS.md, M4: the Api now resolves
       # IKeyManagementProvider eagerly at startup (fail-fast), so ForgeVault.Api.IntegrationTests
