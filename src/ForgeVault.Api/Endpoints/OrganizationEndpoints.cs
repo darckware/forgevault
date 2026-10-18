@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using ForgeVault.Api.Auditing;
+using ForgeVault.Application.Authorization;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -57,12 +58,17 @@ public static class OrganizationEndpoints
             return organization is null ? Results.NotFound() : Results.Ok(ToResponse(organization));
         });
 
-        group.MapPut("/{id:guid}", async (Guid id, UpdateOrganizationRequest request, ForgeVaultDbContext db, CancellationToken ct) =>
+        group.MapPut("/{id:guid}", async (Guid id, UpdateOrganizationRequest request, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
         {
             var organization = await db.Organizations.FindAsync([id], ct);
             if (organization is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await permissions.HasPermissionAsync(user.GetUserId(), Permission.UserManage, new ResourceScope(id, null, null), ct))
+            {
+                return Results.Forbid();
             }
 
             if (request.Name is not null)
@@ -81,17 +87,23 @@ public static class OrganizationEndpoints
             }
 
             organization.UpdatedAt = DateTimeOffset.UtcNow;
+            db.AuditLogs.Add(AuditLogFactory.Create(user.GetUserId(), user.GetActorType(), "ORGANIZATION_UPDATE", "organization", id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
             return Results.Ok(ToResponse(organization));
         });
 
-        group.MapDelete("/{id:guid}", async (Guid id, ForgeVaultDbContext db, CancellationToken ct) =>
+        group.MapDelete("/{id:guid}", async (Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
         {
             var organization = await db.Organizations.FindAsync([id], ct);
             if (organization is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await permissions.HasPermissionAsync(user.GetUserId(), Permission.UserManage, new ResourceScope(id, null, null), ct))
+            {
+                return Results.Forbid();
             }
 
             // docs/modules/01_FOUNDATION_AND_TENANCY.md §4 invariant 1.
@@ -101,6 +113,7 @@ public static class OrganizationEndpoints
             }
 
             db.Organizations.Remove(organization);
+            db.AuditLogs.Add(AuditLogFactory.Create(user.GetUserId(), user.GetActorType(), "ORGANIZATION_DELETE", "organization", id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
 
             return Results.NoContent();

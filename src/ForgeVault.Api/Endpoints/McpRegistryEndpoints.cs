@@ -250,6 +250,7 @@ public static class McpRegistryEndpoints
                 McpRenderOutcome.Forbidden => Results.Forbid(),
                 McpRenderOutcome.AssignmentRevoked => Results.Conflict(new ErrorResponse("assignment_revoked")),
                 McpRenderOutcome.ReferencedSecretNotFound => Results.NotFound(new ErrorResponse($"referenced_secret_not_found:{result.Detail}")),
+                McpRenderOutcome.ReferencedSecretUnavailable => Results.Conflict(new ErrorResponse("referenced_secret_unavailable")),
                 _ => Results.NotFound(),
             };
         }).RequireAuthorization();

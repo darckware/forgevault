@@ -94,6 +94,13 @@ public sealed class AuthService(
             return new AuthFailure("invalid_refresh_token");
         }
 
+        if (existing.User is not { IsActive: true })
+        {
+            await RevokeFamilyAsync(existing.FamilyId, ct);
+            logger.LogInformation("Refresh failed: account disabled.");
+            return new AuthFailure("account_disabled");
+        }
+
         if (existing.RevokedAt is not null)
         {
             // A token that was already rotated is being presented again — treat the

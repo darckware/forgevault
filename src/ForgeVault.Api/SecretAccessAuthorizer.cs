@@ -15,6 +15,13 @@ namespace ForgeVault.Api;
 // surfaces never diverge on who is allowed to read a value.
 internal static class SecretAccessAuthorizer
 {
+    public static async Task<bool> CanReadMetadataAsync(
+        ForgeVaultDbContext db, IPermissionChecker permissions, Guid identityId, Guid secretId, ResourceScope scope, CancellationToken ct)
+    {
+        return await permissions.HasPermissionAsync(identityId, Permission.SecretWrite, scope, ct) ||
+            await CanReadValueAsync(db, permissions, identityId, secretId, scope, ct);
+    }
+
     public static async Task<bool> CanReadValueAsync(
         ForgeVaultDbContext db, IPermissionChecker permissions, Guid identityId, Guid secretId, ResourceScope scope, CancellationToken ct)
     {

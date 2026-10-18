@@ -94,6 +94,24 @@ builder.Services
         // Keep our own JWT claim names ("sub", "email") intact instead of letting the
         // handler remap them to the legacy ClaimTypes XML-schema URIs.
         options.MapInboundClaims = false;
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var subject = context.Principal?.FindFirst("sub")?.Value;
+                if (!Guid.TryParse(subject, out var userId))
+                {
+                    context.Fail("invalid_subject");
+                    return;
+                }
+
+                var db = context.HttpContext.RequestServices.GetRequiredService<ForgeVaultDbContext>();
+                if (!await db.Users.AnyAsync(u => u.Id == userId && u.IsActive, context.HttpContext.RequestAborted))
+                {
+                    context.Fail("account_disabled");
+                }
+            },
+        };
 
         options.TokenValidationParameters = new TokenValidationParameters
         {

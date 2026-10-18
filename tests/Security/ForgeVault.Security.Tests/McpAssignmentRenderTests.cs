@@ -68,6 +68,24 @@ public sealed class McpAssignmentRenderTests(LoggingWebApplicationFactory factor
         Assert.DoesNotContain(secretValue, revealLog.Metadata, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Render_ExpiredSecret_DoesNotRevealValue()
+    {
+        var (_, agent, secretValue, secretId, assignmentId) = await SetupSelfRenderableAssignmentAsync();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+            var secret = await db.Secrets.SingleAsync(s => s.Id == secretId);
+            secret.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+        }
+
+        var response = await agent.GetAsync($"/api/v1/mcp-assignments/{assignmentId}/render");
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.DoesNotContain(secretValue, await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
     private async Task<(HttpClient Owner, HttpClient Agent, string SecretValue, Guid SecretId, Guid AssignmentId)> SetupSelfRenderableAssignmentAsync()
     {
         var secretValue = $"sk-mcp-render-{Guid.NewGuid():N}";

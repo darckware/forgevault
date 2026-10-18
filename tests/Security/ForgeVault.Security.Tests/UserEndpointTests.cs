@@ -89,6 +89,22 @@ public sealed class UserEndpointTests(LoggingWebApplicationFactory factory) : IC
     }
 
     [Fact]
+    public async Task OwnerOfOneOrganizationCannotDeactivateAnotherOrganizationsOwner()
+    {
+        var (firstOwner, firstOwnerId) = await CreateAuthenticatedClientAsync();
+        var (secondOwner, secondOwnerId) = await CreateAuthenticatedClientAsync();
+        await GrantOwnerAtNewOrganizationAsync(firstOwner, firstOwnerId);
+        await GrantOwnerAtNewOrganizationAsync(secondOwner, secondOwnerId);
+
+        var response = await firstOwner.PostAsync($"/api/v1/users/{secondOwnerId}/deactivate", null);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        Assert.True(await db.Users.Where(u => u.Id == secondOwnerId).Select(u => u.IsActive).SingleAsync());
+    }
+
+    [Fact]
     public async Task Delete_RemovesUserAndRevokesRoleAssignments_CannotDeleteSelf_RequiresUserManage()
     {
         var (owner, ownerId) = await CreateAuthenticatedClientAsync();

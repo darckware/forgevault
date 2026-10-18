@@ -5,6 +5,7 @@ using ForgeVault.Application.Auth;
 using ForgeVault.Domain.Entities;
 using ForgeVault.Infrastructure.Persistence;
 using ForgeVault.TestSupport;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeVault.E2E.Tests;
@@ -64,6 +65,45 @@ public sealed class AuthFlowTests(IsolatedWebApplicationFactory factory) : IClas
         // And it must have revoked the whole family — the freshly rotated token is now unusable too.
         var afterReuseResponse = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { refreshToken = rotated.RefreshToken });
         Assert.Equal(HttpStatusCode.Unauthorized, afterReuseResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_RejectsDeactivatedUser()
+    {
+        var (email, password) = await SeedUserAsync();
+        var client = factory.CreateClient();
+        var login = await LoginAsync(client, email, password);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Email == email);
+            user.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+
+        var refresh = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { refreshToken = login.RefreshToken });
+        Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
+    }
+
+    [Fact]
+    public async Task AccessToken_RejectsDeactivatedUserImmediately()
+    {
+        var (email, password) = await SeedUserAsync();
+        var client = factory.CreateClient();
+        var login = await LoginAsync(client, email, password);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.AccessToken);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Email == email);
+            user.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync("/api/v1/auth/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     private async Task<(string Email, string Password)> SeedUserAsync()

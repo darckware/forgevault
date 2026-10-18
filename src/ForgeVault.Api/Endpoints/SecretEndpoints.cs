@@ -91,9 +91,30 @@ public static class SecretEndpoints
             return Results.Created($"/api/v1/secrets/{secret.Id}", SecretScopeResolver.ToMetadataResponse(secret));
         });
 
-        group.MapGet("/", async (Guid? environmentId, ForgeVaultDbContext db, CancellationToken ct) =>
+        group.MapGet("/", async (Guid? environmentId, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, CancellationToken ct) =>
         {
-            var query = db.Secrets.AsQueryable();
+            var identityId = user.GetUserId();
+            var environments = await db.Environments
+                .Where(e => environmentId == null || e.Id == environmentId)
+                .Select(e => new { e.Id, e.ProjectId, OrganizationId = e.Project!.OrganizationId })
+                .ToListAsync(ct);
+            var readableEnvironmentIds = new List<Guid>();
+            foreach (var environment in environments)
+            {
+                var scope = new ResourceScope(environment.OrganizationId, environment.ProjectId, environment.Id);
+                if (await permissions.HasPermissionAsync(identityId, Permission.SecretWrite, scope, ct) ||
+                    await permissions.HasPermissionAsync(identityId, Permission.SecretReadValue, scope, ct))
+                {
+                    readableEnvironmentIds.Add(environment.Id);
+                }
+            }
+
+            var grantedSecretIds = await db.SecretAccessGrants
+                .Where(g => g.IdentityId == identityId && g.RevokedAt == null)
+                .Select(g => g.SecretId)
+                .ToListAsync(ct);
+            var query = db.Secrets.Where(s =>
+                readableEnvironmentIds.Contains(s.EnvironmentId) || grantedSecretIds.Contains(s.Id));
             if (environmentId is not null)
             {
                 query = query.Where(s => s.EnvironmentId == environmentId);
@@ -103,12 +124,18 @@ public static class SecretEndpoints
             return Results.Ok(secrets.Select(SecretScopeResolver.ToMetadataResponse));
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, ForgeVaultDbContext db, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
         {
-            var secret = await db.Secrets.FindAsync([id], ct);
-            if (secret is null)
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
+            if (resolved is null)
             {
                 return Results.NotFound();
+            }
+
+            var (secret, scope) = resolved.Value;
+            if (!await SecretAccessAuthorizer.CanReadMetadataAsync(db, permissions, user.GetUserId(), id, scope, ct))
+            {
+                return Results.Forbid();
             }
 
             db.AuditLogs.Add(AuditLogFactory.Create(user.GetUserId(), user.GetActorType(), "SECRET_READ", "secret", id, http.TraceIdentifier));
@@ -184,11 +211,17 @@ public static class SecretEndpoints
             return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
         });
 
-        group.MapGet("/{id:guid}/versions", async (Guid id, ForgeVaultDbContext db, CancellationToken ct) =>
+        group.MapGet("/{id:guid}/versions", async (Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, CancellationToken ct) =>
         {
-            if (!await db.Secrets.AnyAsync(s => s.Id == id, ct))
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
+            if (resolved is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await SecretAccessAuthorizer.CanReadMetadataAsync(db, permissions, user.GetUserId(), id, resolved.Value.Scope, ct))
+            {
+                return Results.Forbid();
             }
 
             var versions = await db.SecretVersions

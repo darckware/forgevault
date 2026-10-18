@@ -941,6 +941,7 @@ public sealed class VaultTools
             McpRenderOutcome.Forbidden => throw new McpException("forbidden"),
             McpRenderOutcome.AssignmentRevoked => throw new McpException("assignment_revoked"),
             McpRenderOutcome.ReferencedSecretNotFound => throw new McpException($"referenced_secret_not_found:{result.Detail}"),
+            McpRenderOutcome.ReferencedSecretUnavailable => throw new McpException("referenced_secret_unavailable"),
             McpRenderOutcome.AssignmentNotFound => throw new McpException("mcp_assignment_not_found"),
             _ => throw new McpException("mcp_server_not_found"),
         };

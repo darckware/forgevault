@@ -23,6 +23,7 @@ internal enum McpRenderOutcome
     AssignmentNotFound,
     DefinitionNotFound,
     ReferencedSecretNotFound,
+    ReferencedSecretUnavailable,
     Forbidden,
     AssignmentRevoked,
 }
@@ -97,6 +98,16 @@ internal static class McpAssignmentRenderer
             }
 
             var (secret, scope) = resolved.Value;
+
+            if (secret.Status is not SecretStatus.Active ||
+                (secret.ExpiresAt is not null && secret.ExpiresAt <= DateTimeOffset.UtcNow))
+            {
+                db.AuditLogs.Add(AuditLogFactory.Create(
+                    callerId, callerType, "FAILED_ACCESS", "secret", secretId, requestId,
+                    """{"reason":"secret_unavailable","context":"mcp_render"}"""));
+                await db.SaveChangesAsync(ct);
+                return Result(McpRenderOutcome.ReferencedSecretUnavailable);
+            }
 
             // Self-render trusts the assignment (an Owner/Admin with McpRegistryWrite already
             // decided this identity should have this value when creating it); rendering on

@@ -29,7 +29,7 @@ public static class UserEndpoints
             CancellationToken ct) =>
         {
             var callerId = user.GetUserId();
-            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
+            if (!await HasOrganizationUserManageAsync(db, callerId, ct))
             {
                 return Results.Forbid();
             }
@@ -73,7 +73,7 @@ public static class UserEndpoints
         group.MapGet("/", async (
             ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, CancellationToken ct) =>
         {
-            if (!await permissions.HasPermissionAnywhereAsync(user.GetUserId(), Permission.UserManage, ct))
+            if (!await HasOrganizationUserManageAsync(db, user.GetUserId(), ct))
             {
                 return Results.Forbid();
             }
@@ -104,15 +104,15 @@ public static class UserEndpoints
             CancellationToken ct) =>
         {
             var callerId = user.GetUserId();
-            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
-            {
-                return Results.Forbid();
-            }
-
             var target = await db.Users.FindAsync([id], ct);
             if (target is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await CanManageUserAsync(db, permissions, callerId, id, ct))
+            {
+                return Results.Forbid();
             }
 
             if (request.Username is not null)
@@ -158,15 +158,15 @@ public static class UserEndpoints
             Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
         {
             var callerId = user.GetUserId();
-            if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
-            {
-                return Results.Forbid();
-            }
-
             var target = await db.Users.FindAsync([id], ct);
             if (target is null)
             {
                 return Results.NotFound();
+            }
+
+            if (!await CanManageUserAsync(db, permissions, callerId, id, ct))
+            {
+                return Results.Forbid();
             }
 
             if (id == callerId)
@@ -205,15 +205,15 @@ public static class UserEndpoints
         ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct)
     {
         var callerId = user.GetUserId();
-        if (!await permissions.HasPermissionAnywhereAsync(callerId, Permission.UserManage, ct))
-        {
-            return Results.Forbid();
-        }
-
         var target = await db.Users.FindAsync([id], ct);
         if (target is null)
         {
             return Results.NotFound();
+        }
+
+        if (!await CanManageUserAsync(db, permissions, callerId, id, ct))
+        {
+            return Results.Forbid();
         }
 
         if (id == callerId && !isActive)
@@ -229,11 +229,46 @@ public static class UserEndpoints
         {
             target.IsActive = isActive;
             target.UpdatedAt = DateTimeOffset.UtcNow;
+            if (!isActive)
+            {
+                await db.RefreshTokens
+                    .Where(t => t.UserId == id && t.RevokedAt == null)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(t => t.RevokedAt, DateTimeOffset.UtcNow), ct);
+            }
             db.AuditLogs.Add(AuditLogFactory.Create(callerId, user.GetActorType(), auditAction, "user", target.Id, http.TraceIdentifier));
             await db.SaveChangesAsync(ct);
         }
 
         return Results.Ok(ToResponse(target));
+    }
+
+    private static async Task<bool> HasOrganizationUserManageAsync(ForgeVaultDbContext db, Guid callerId, CancellationToken ct) =>
+        await db.RoleAssignments.AnyAsync(r => r.IdentityId == callerId && r.RevokedAt == null &&
+            r.ScopeType == RoleScopeType.Organization && (r.Role == Role.Owner || r.Role == Role.Admin), ct);
+
+    private static async Task<bool> CanManageUserAsync(
+        ForgeVaultDbContext db, IPermissionChecker permissions, Guid callerId, Guid targetId, CancellationToken ct)
+    {
+        var assignments = await db.RoleAssignments
+            .Where(r => r.IdentityId == targetId && r.RevokedAt == null)
+            .Select(r => new { r.ScopeType, r.ScopeId })
+            .ToListAsync(ct);
+
+        if (assignments.Count == 0)
+        {
+            return await HasOrganizationUserManageAsync(db, callerId, ct);
+        }
+
+        foreach (var assignment in assignments)
+        {
+            var scope = await RoleAssignmentScopeResolver.ResolveAsync(db, assignment.ScopeType, assignment.ScopeId, ct);
+            if (scope is null || !await permissions.HasPermissionAsync(callerId, Permission.UserManage, scope, ct))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static UserResponse ToResponse(User user) => new(
