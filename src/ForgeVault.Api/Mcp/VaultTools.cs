@@ -759,10 +759,10 @@ public sealed class VaultTools
     }
 
     [McpServerTool(Name = "admin.agent.rename")]
-    [Description("Renames a ServiceAccount to the standard name agent:<nome> (agents) or service:<nome> (systems), e.g. agent:porthus. Keeps id, tokens and every grant. Same authorization as issuing it a token (UserManage in every scope it holds). Audited as SERVICE_ACCOUNT_RENAME with the old and new names.")]
+    [Description("Renames a ServiceAccount to the standard name: <agente> (porthus, aramis, dartan, maia), <sistema>-<agente> (forgerouter-porthus, coreti-dartan) or service:<sistema>-<ambiente>. Keeps id, tokens and every grant. Same authorization as issuing it a token (UserManage in every scope it holds). Audited as SERVICE_ACCOUNT_RENAME with the old and new names.")]
     public static async Task<ServiceAccountResponse> AdminAgentRenameAsync(
         [Description("ServiceAccount id")] Guid serviceAccountId,
-        [Description("New name: agent:<nome> or service:<nome>, lowercase letters, digits and hyphens")] string name,
+        [Description("New name, e.g. aramis, coreti-dartan or service:coreti-development: lowercase letters, digits and hyphens")] string name,
         ForgeVaultDbContext db,
         IPermissionChecker permissions,
         ClaimsPrincipal user,

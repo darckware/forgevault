@@ -89,9 +89,9 @@ public sealed class McpToolsTests(IsolatedWebApplicationFactory factory) : IClas
         var accountId = registration.GetProperty("serviceAccountId").GetGuid();
         var oldName = registration.GetProperty("name").GetString();
         var agentToken = registration.GetProperty("token").GetString();
-        var newName = $"agent:porthus-{Guid.NewGuid():N}"[..30];
+        var newName = $"aramis-{Guid.NewGuid():N}"[..23];
 
-        foreach (var bad in new[] { "porthus", "Agent:Porthus", "agent:", "agent:por thus", "bot:porthus" })
+        foreach (var bad in new[] { "Aramis", "coreti_dartan", "coreti dartan", "-aramis", "aramis-", "agent:aramis", "service:", "bot:aramis" })
         {
             var (badIsError, badText) = await CallToolAsync(owner, "admin.agent.rename", new { serviceAccountId = accountId, name = bad });
             Assert.True(badIsError, bad);

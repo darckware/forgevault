@@ -100,8 +100,8 @@ public static class ServiceAccountEndpoints
             return Results.Ok(new ServiceAccountTokenResponse(rawToken, token.TokenPrefix, token.IssuedAt));
         });
 
-        // Rename keeps id, tokens and grants (2026-10-27, Marcelo: standard identity names
-        // agent:<nome> / service:<nome>); same authorization as minting a token.
+        // Rename keeps id, tokens and grants (2026-10-27, Marcelo: standard identity names);
+        // same authorization as minting a token.
         group.MapPatch("/{id:guid}", async (
             Guid id,
             RenameServiceAccountRequest request,
@@ -224,8 +224,10 @@ public static class ServiceAccountEndpoints
 
     // A token grants the account's roles, direct secret grants and MCP assignments.
     // The caller must administer every active scope those access paths reach.
-    // Standard identity names: agent:<nome> for agents, service:<nome> for systems.
-    internal static readonly Regex StandardName = new("^(agent|service):[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant);
+    // Standard identity names (lowercase words joined by hyphens): <agente> for an agent's own
+    // identity (porthus, aramis, dartan, maia), <sistema>-<agente> for one a system holds for an
+    // agent (forgerouter-porthus, coreti-dartan), service:<sistema>-<ambiente> for applications.
+    internal static readonly Regex StandardName = new("^(service:)?[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant);
 
     internal static async Task<(ServiceAccount? Account, string? Error)> RenameAsync(
         ForgeVaultDbContext db,
