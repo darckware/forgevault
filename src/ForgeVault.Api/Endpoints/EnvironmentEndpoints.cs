@@ -27,38 +27,16 @@ public static class EnvironmentEndpoints
                 HttpContext http,
                 CancellationToken ct) =>
             {
-                var project = await db.Projects.FindAsync([projectId], ct);
-                if (project is null)
+                var (environment, error) = await TenancyProvisioning.CreateEnvironmentAsync(
+                    db, permissions, projectId, request.Name, request.Slug,
+                    user.GetUserId(), user.GetActorType(), http.TraceIdentifier, ct);
+                return error switch
                 {
-                    return Results.NotFound(new ErrorResponse("project_not_found"));
-                }
-
-                var identityId = user.GetUserId();
-                var scope = new ResourceScope(project.OrganizationId, project.Id, null);
-                if (!await permissions.HasPermissionAsync(identityId, Permission.EnvironmentWrite, scope, ct))
-                {
-                    return Results.Forbid();
-                }
-
-                if (await db.Environments.AnyAsync(e => e.ProjectId == projectId && e.Name == request.Name, ct))
-                {
-                    return Results.Conflict(new ErrorResponse("environment_already_exists"));
-                }
-
-                var environment = new Environment
-                {
-                    Id = Guid.NewGuid(),
-                    ProjectId = projectId,
-                    Name = request.Name,
-                    Slug = request.Slug,
-                    CreatedAt = DateTimeOffset.UtcNow,
+                    null => Results.Created($"/api/v1/environments/{environment!.Id}", environment),
+                    "project_not_found" => Results.NotFound(new ErrorResponse(error)),
+                    "forbidden" => Results.Forbid(),
+                    _ => Results.Conflict(new ErrorResponse(error)),
                 };
-
-                db.Environments.Add(environment);
-                db.AuditLogs.Add(AuditLogFactory.Create(identityId, user.GetActorType(), "ENVIRONMENT_CREATE", "environment", environment.Id, http.TraceIdentifier));
-                await db.SaveChangesAsync(ct);
-
-                return Results.Created($"/api/v1/environments/{environment.Id}", ToResponse(environment));
             }).RequireAuthorization();
 
         app.MapGet("/api/v1/projects/{projectId:guid}/environments",
@@ -115,7 +93,7 @@ public static class EnvironmentEndpoints
         });
     }
 
-    private static EnvironmentResponse ToResponse(Environment environment) => new(
+    internal static EnvironmentResponse ToResponse(Environment environment) => new(
         environment.Id,
         environment.ProjectId,
         environment.Name.ToString(),

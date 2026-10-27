@@ -155,6 +155,44 @@ public sealed class VaultTools
         return new { allowed };
     }
 
+    [McpServerTool(Name = "admin.project.create")]
+    [Description("Creates a Project in an Organization -- mirrors POST /api/v1/organizations/{id}/projects. Needs ProjectCreate at Organization scope (Owner, Admin, ProjectAdmin or Provisioner). A creator without an Organization-level admin role (Provisioner) becomes Admin of the new project only.")]
+    public static async Task<ProjectResponse> AdminProjectCreateAsync(
+        [Description("Organization id")] Guid organizationId,
+        [Description("Project name, unique in the organization")] string name,
+        [Description("Project slug, unique in the organization, e.g. moodle")] string slug,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct,
+        string? description = null)
+    {
+        var (project, error) = await TenancyProvisioning.CreateProjectAsync(
+            db, permissions, organizationId, name, slug, description, user.GetUserId(), user.GetActorType(), NewRequestId(), ct);
+        return project ?? throw new McpException(error!);
+    }
+
+    [McpServerTool(Name = "admin.environment.create")]
+    [Description("Creates an Environment in a Project -- mirrors POST /api/v1/projects/{id}/environments. Needs EnvironmentWrite at the project (Owner/Admin/ProjectAdmin there, or the Provisioner that created it).")]
+    public static async Task<EnvironmentResponse> AdminEnvironmentCreateAsync(
+        [Description("Project id")] Guid projectId,
+        [Description("Environment kind: Development, Staging, Production or Shared")] string name,
+        [Description("Environment slug, e.g. production")] string slug,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        if (!Enum.TryParse<EnvironmentKind>(name, ignoreCase: true, out var kind))
+        {
+            throw new McpException("unknown_environment_kind");
+        }
+
+        var (environment, error) = await TenancyProvisioning.CreateEnvironmentAsync(
+            db, permissions, projectId, kind, slug, user.GetUserId(), user.GetActorType(), NewRequestId(), ct);
+        return environment ?? throw new McpException(error!);
+    }
+
     [McpServerTool(Name = "admin.secret.create")]
     [Description("Creates a secret and its first version. Value is encrypted before storage — mirrors POST /api/v1/secrets.")]
     public static async Task<SecretResponse> AdminSecretCreateAsync(
@@ -563,7 +601,7 @@ public sealed class VaultTools
     [Description("Grants a role to an identity (a User or ServiceAccount id) at a scope (Organization/Project/Environment). RBAC gated by RoleAssignmentWrite (Owner/Admin) at that scope. Idempotent for the same (identity, role, scope).")]
     public static async Task<object> AdminRoleGrantAsync(
         [Description("Identity to grant the role to (a User or ServiceAccount id)")] Guid identityId,
-        [Description("Role name: Owner, Admin, SecurityAdmin, ProjectAdmin, Developer, Operator, Auditor, ReadOnly, Agent, ServiceAccount")] string role,
+        [Description("Role name: Owner, Admin, SecurityAdmin, ProjectAdmin, Developer, Operator, Auditor, ReadOnly, Agent, ServiceAccount, Provisioner")] string role,
         [Description("Scope type: Organization, Project, or Environment")] string scopeType,
         [Description("Id of the Organization/Project/Environment matching scopeType")] Guid scopeId,
         ForgeVaultDbContext db,

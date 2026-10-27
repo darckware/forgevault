@@ -9,7 +9,8 @@ namespace ForgeVault.Api.Endpoints;
 
 // docs/modules/01_FOUNDATION_AND_TENANCY.md. Thin CRUD; ProjectWrite RBAC added in M5
 // (docs/architecture/IMPLEMENTATION_READINESS.md) — a RoleAssignment at Organization scope
-// (or, once one exists, at the Project's own scope) is required to write.
+// (or, once one exists, at the Project's own scope) is required to write. Creation checks
+// ProjectCreate and is shared with MCP admin.project.create (TenancyProvisioning).
 public static class ProjectEndpoints
 {
     public static void MapProjectEndpoints(this WebApplication app)
@@ -24,42 +25,16 @@ public static class ProjectEndpoints
                 HttpContext http,
                 CancellationToken ct) =>
             {
-                var organization = await db.Organizations.FindAsync([organizationId], ct);
-                if (organization is null)
+                var (project, error) = await TenancyProvisioning.CreateProjectAsync(
+                    db, permissions, organizationId, request.Name, request.Slug, request.Description,
+                    user.GetUserId(), user.GetActorType(), http.TraceIdentifier, ct);
+                return error switch
                 {
-                    return Results.NotFound(new ErrorResponse("organization_not_found"));
-                }
-
-                var identityId = user.GetUserId();
-                var scope = new ResourceScope(organizationId, null, null);
-                if (!await permissions.HasPermissionAsync(identityId, Permission.ProjectWrite, scope, ct))
-                {
-                    return Results.Forbid();
-                }
-
-                if (await db.Projects.AnyAsync(p => p.OrganizationId == organizationId && p.Name == request.Name, ct))
-                {
-                    return Results.Conflict(new ErrorResponse("project_name_taken"));
-                }
-
-                var now = DateTimeOffset.UtcNow;
-                var project = new Project
-                {
-                    Id = Guid.NewGuid(),
-                    OrganizationId = organizationId,
-                    Name = request.Name,
-                    Slug = request.Slug,
-                    Description = request.Description,
-                    Status = ProjectStatus.Active,
-                    CreatedAt = now,
-                    UpdatedAt = now,
+                    null => Results.Created($"/api/v1/projects/{project!.Id}", project),
+                    "organization_not_found" => Results.NotFound(new ErrorResponse(error)),
+                    "forbidden" => Results.Forbid(),
+                    _ => Results.Conflict(new ErrorResponse(error)),
                 };
-
-                db.Projects.Add(project);
-                db.AuditLogs.Add(AuditLogFactory.Create(identityId, user.GetActorType(), "PROJECT_CREATE", "project", project.Id, http.TraceIdentifier));
-                await db.SaveChangesAsync(ct);
-
-                return Results.Created($"/api/v1/projects/{project.Id}", ToResponse(project));
             }).RequireAuthorization();
 
         app.MapGet("/api/v1/organizations/{organizationId:guid}/projects",
@@ -158,7 +133,7 @@ public static class ProjectEndpoints
         });
     }
 
-    private static ProjectResponse ToResponse(Project project) => new(
+    internal static ProjectResponse ToResponse(Project project) => new(
         project.Id,
         project.OrganizationId,
         project.Name,

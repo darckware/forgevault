@@ -40,6 +40,7 @@ export const ROLES = [
   "ReadOnly",
   "Agent",
   "ServiceAccount",
+  "Provisioner",
 ] as const;
 export type Role = (typeof ROLES)[number];
 

@@ -25,6 +25,12 @@ public enum Permission
     // the only way to create a human account was a direct INSERT
     // against the database (same gap RoleAssignmentWrite closed for role grants in M9).
     UserManage,
+
+    // Create a Project in an Organization -- and nothing else at that scope. Split from
+    // ProjectWrite (which also updates/deletes every project below the scope) so the
+    // Provisioner role can open new projects without touching existing ones. The creator is
+    // made Admin of the new project only (TenancyProvisioning.CreateProjectAsync).
+    ProjectCreate,
 }
 
 // Whichever levels of the hierarchy are known for the resource being checked — a
