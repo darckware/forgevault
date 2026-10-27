@@ -9,8 +9,8 @@ namespace ForgeVault.Api.Endpoints;
 
 // docs/modules/01_FOUNDATION_AND_TENANCY.md. Thin CRUD; ProjectWrite RBAC added in M5
 // (docs/architecture/IMPLEMENTATION_READINESS.md) — a RoleAssignment at Organization scope
-// (or, once one exists, at the Project's own scope) is required to write. Creation checks
-// ProjectCreate and is shared with MCP admin.project.create (TenancyProvisioning).
+// (or, once one exists, at the Project's own scope) is required to write. Creation is shared
+// with MCP admin.project.create (TenancyProvisioning).
 public static class ProjectEndpoints
 {
     public static void MapProjectEndpoints(this WebApplication app)

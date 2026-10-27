@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ForgeVault.Api.Auditing;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Domain.Entities;
@@ -9,12 +8,9 @@ using Environment = ForgeVault.Domain.Entities.Environment;
 namespace ForgeVault.Api.Endpoints;
 
 // Project/Environment creation shared by REST (ProjectEndpoints/EnvironmentEndpoints) and MCP
-// (admin.project.create/admin.environment.create), so both surfaces enforce the same checks.
-//
-// A project is created under ProjectCreate at Organization scope. When the creator does not
-// already administer the new project through an Organization-level role (the Provisioner
-// case), it is granted Admin at that Project scope -- so it can add environments, secrets and
-// agents there, and nowhere else. Errors are returned as the codes the callers already use.
+// (admin.project.create/admin.environment.create), so both surfaces enforce the same checks:
+// ProjectWrite at Organization scope for a project, EnvironmentWrite at the project for an
+// environment. Errors are returned as the codes the callers already use.
 internal static class TenancyProvisioning
 {
     public static async Task<(ProjectResponse? Project, string? Error)> CreateProjectAsync(
@@ -34,7 +30,7 @@ internal static class TenancyProvisioning
             return (null, "organization_not_found");
         }
 
-        if (!await permissions.HasPermissionAsync(actorId, Permission.ProjectCreate, new ResourceScope(organizationId, null, null), ct))
+        if (!await permissions.HasPermissionAsync(actorId, Permission.ProjectWrite, new ResourceScope(organizationId, null, null), ct))
         {
             return (null, "forbidden");
         }
@@ -63,24 +59,6 @@ internal static class TenancyProvisioning
         };
         db.Projects.Add(project);
         db.AuditLogs.Add(AuditLogFactory.Create(actorId, actorType, "PROJECT_CREATE", "project", project.Id, requestId));
-
-        var projectScope = new ResourceScope(organizationId, project.Id, null);
-        if (!await permissions.HasPermissionAsync(actorId, Permission.RoleAssignmentWrite, projectScope, ct))
-        {
-            var assignment = new RoleAssignment
-            {
-                Id = Guid.NewGuid(),
-                IdentityId = actorId,
-                Role = Role.Admin,
-                ScopeType = RoleScopeType.Project,
-                ScopeId = project.Id,
-                CreatedAt = now,
-            };
-            db.RoleAssignments.Add(assignment);
-            db.AuditLogs.Add(AuditLogFactory.Create(
-                actorId, actorType, "ACCESS_GRANTED", "role_assignment", assignment.Id, requestId,
-                JsonSerializer.Serialize(new { via = "project-creator", projectId = project.Id })));
-        }
 
         await db.SaveChangesAsync(ct);
         return (ProjectEndpoints.ToResponse(project), null);

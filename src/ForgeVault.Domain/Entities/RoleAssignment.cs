@@ -13,11 +13,6 @@ public enum Role
     ReadOnly,
     Agent,
     ServiceAccount,
-
-    // Organization-level provisioning for external agents (Porthus, Aramis, Dartan): may only
-    // create projects; becomes Admin of each project it creates, and of nothing else. Never
-    // reads or changes secrets, roles or projects it did not create.
-    Provisioner,
 }
 
 public enum RoleScopeType

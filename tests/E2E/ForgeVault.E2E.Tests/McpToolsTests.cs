@@ -39,80 +39,44 @@ public sealed class McpToolsTests(IsolatedWebApplicationFactory factory) : IClas
     }
 
     [Fact]
-    public async Task Provisioner_CreatesProject_AdministersOnlyIt_AndNeverReachesOtherProjects()
+    public async Task AdminProjectAndEnvironmentCreate_RequireOrganizationAdmin_AndAudit()
     {
-        const string otherValue = "sk-other-project-provisioner-must-not-see";
-        const string ownValue = "sk-own-project-provisioner-value";
-
         var (owner, ownerId) = await CreateAuthenticatedClientAsync();
-        var otherEnvironmentId = await CreateOrgProjectEnvironmentAsync(owner, ownerId);
-        var (organizationId, otherProjectId) = await OrganizationAndProjectOfAsync(otherEnvironmentId);
-        var otherSecret = await (await owner.PostAsJsonAsync("/api/v1/secrets", new
-        {
-            environmentId = otherEnvironmentId, name = "OTHER_API_KEY", type = "ApiKey",
-            provider = (string?)null, description = (string?)null, value = otherValue, expiresAt = (DateTimeOffset?)null,
-        })).Content.ReadFromJsonAsync<IdResponse>();
+        var existingEnvironmentId = await CreateOrgProjectEnvironmentAsync(owner, ownerId);
+        var (organizationId, existingProjectId) = await OrganizationAndProjectOfAsync(existingEnvironmentId);
 
         var (stranger, _) = await CreateAuthenticatedClientAsync();
         var (strangerIsError, strangerText) = await CallToolAsync(stranger, "admin.project.create", new { organizationId, name = "nope", slug = "nope" });
         Assert.True(strangerIsError);
         Assert.Contains("forbidden", strangerText, StringComparison.Ordinal);
+        var (strangerEnvIsError, _) = await CallToolAsync(stranger, "admin.environment.create", new { projectId = existingProjectId, name = "Staging", slug = "staging" });
+        Assert.True(strangerEnvIsError);
 
-        var (provisioner, provisionerId) = await CreateAuthenticatedClientAsync();
-        await GrantRoleAsync(provisionerId, Role.Provisioner, RoleScopeType.Organization, organizationId);
-
-        // Own project: create it, then everything inside it.
-        var (projectIsError, projectText) = await CallToolAsync(provisioner, "admin.project.create", new { organizationId, name = "Moodle", slug = "moodle" });
+        var (projectIsError, projectText) = await CallToolAsync(owner, "admin.project.create", new { organizationId, name = "Moodle", slug = "moodle" });
         Assert.False(projectIsError, projectText);
         var projectId = JsonDocument.Parse(projectText!).RootElement.GetProperty("id").GetGuid();
 
-        var (dupIsError, dupText) = await CallToolAsync(provisioner, "admin.project.create", new { organizationId, name = "Moodle 2", slug = "moodle" });
+        var (dupIsError, dupText) = await CallToolAsync(owner, "admin.project.create", new { organizationId, name = "Moodle 2", slug = "moodle" });
         Assert.True(dupIsError);
         Assert.Contains("project_slug_taken", dupText, StringComparison.Ordinal);
 
-        var (envIsError, envText) = await CallToolAsync(provisioner, "admin.environment.create", new { projectId, name = "Production", slug = "production" });
+        var (badKindIsError, badKindText) = await CallToolAsync(owner, "admin.environment.create", new { projectId, name = "Prod", slug = "prod" });
+        Assert.True(badKindIsError);
+        Assert.Contains("unknown_environment_kind", badKindText, StringComparison.Ordinal);
+
+        var (envIsError, envText) = await CallToolAsync(owner, "admin.environment.create", new { projectId, name = "Production", slug = "production" });
         Assert.False(envIsError, envText);
         var environmentId = JsonDocument.Parse(envText!).RootElement.GetProperty("id").GetGuid();
 
-        var (secretIsError, secretText) = await CallToolAsync(provisioner, "admin.secret.create", new { environmentId, name = "MOODLE_TOKEN_PRODUCTION", type = "ApiKey", value = ownValue });
-        Assert.False(secretIsError, secretText);
-        var ownSecretId = JsonDocument.Parse(secretText!).RootElement.GetProperty("id").GetGuid();
-
-        var (registerIsError, registerText) = await CallToolAsync(provisioner, "admin.agent.register", new { name = $"agent-{Guid.NewGuid():N}", scopeType = "Environment", scopeId = environmentId });
-        Assert.False(registerIsError, registerText);
-        var agentId = JsonDocument.Parse(registerText!).RootElement.GetProperty("serviceAccountId").GetGuid();
-        var (grantIsError, grantText) = await CallToolAsync(provisioner, "admin.secret.grant_access", new { secretId = ownSecretId, identityId = agentId });
-        Assert.False(grantIsError, grantText);
-
-        // Anything outside the project it created is denied.
-        var (readOtherIsError, readOtherText) = await CallToolAsync(provisioner, "credential.request", new { secretId = otherSecret!.Id });
-        Assert.True(readOtherIsError);
-        Assert.DoesNotContain(otherValue, readOtherText!, StringComparison.Ordinal);
-
-        var (writeOtherIsError, _) = await CallToolAsync(provisioner, "admin.secret.create", new { environmentId = otherEnvironmentId, name = "X", type = "ApiKey", value = "x" });
-        Assert.True(writeOtherIsError);
-        var (envOtherIsError, _) = await CallToolAsync(provisioner, "admin.environment.create", new { projectId = otherProjectId, name = "Staging", slug = "staging" });
-        Assert.True(envOtherIsError);
-        var (roleOrgIsError, _) = await CallToolAsync(provisioner, "admin.role.grant", new { identityId = provisionerId, role = "Admin", scopeType = "Organization", scopeId = organizationId });
-        Assert.True(roleOrgIsError);
-        var (agentOrgIsError, _) = await CallToolAsync(provisioner, "admin.agent.register", new { name = $"agent-{Guid.NewGuid():N}", scopeType = "Project", scopeId = otherProjectId });
-        Assert.True(agentOrgIsError);
-
-        var update = await provisioner.PutAsJsonAsync($"/api/v1/projects/{otherProjectId}", new { name = "hijacked" });
-        Assert.Equal(System.Net.HttpStatusCode.Forbidden, update.StatusCode);
-        var delete = await provisioner.DeleteAsync($"/api/v1/projects/{otherProjectId}");
-        Assert.Equal(System.Net.HttpStatusCode.Forbidden, delete.StatusCode);
+        var (dupEnvIsError, dupEnvText) = await CallToolAsync(owner, "admin.environment.create", new { projectId, name = "Production", slug = "prod2" });
+        Assert.True(dupEnvIsError);
+        Assert.Contains("environment_already_exists", dupEnvText, StringComparison.Ordinal);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
-        var creatorGrant = await db.RoleAssignments.SingleAsync(r => r.IdentityId == provisionerId && r.ScopeType == RoleScopeType.Project);
-        Assert.Equal(Role.Admin, creatorGrant.Role);
-        Assert.Equal(projectId, creatorGrant.ScopeId);
-        var grantLog = await db.AuditLogs.SingleAsync(a => a.ResourceId == creatorGrant.Id && a.Action == "ACCESS_GRANTED");
-        Assert.Contains("project-creator", grantLog.Metadata, StringComparison.Ordinal);
-
-        // An Organization Owner creating a project gets no redundant project-level grant.
-        Assert.False(await db.RoleAssignments.AnyAsync(r => r.IdentityId == ownerId && r.ScopeType == RoleScopeType.Project));
+        Assert.True(await db.AuditLogs.AnyAsync(a => a.ResourceId == projectId && a.Action == "PROJECT_CREATE"));
+        Assert.True(await db.AuditLogs.AnyAsync(a => a.ResourceId == environmentId && a.Action == "ENVIRONMENT_CREATE"));
+        Assert.False(await db.RoleAssignments.AnyAsync(r => r.ScopeType == RoleScopeType.Project && r.ScopeId == projectId));
     }
 
     [Fact]

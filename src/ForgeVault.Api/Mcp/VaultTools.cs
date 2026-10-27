@@ -156,7 +156,7 @@ public sealed class VaultTools
     }
 
     [McpServerTool(Name = "admin.project.create")]
-    [Description("Creates a Project in an Organization -- mirrors POST /api/v1/organizations/{id}/projects. Needs ProjectCreate at Organization scope (Owner, Admin, ProjectAdmin or Provisioner). A creator without an Organization-level admin role (Provisioner) becomes Admin of the new project only.")]
+    [Description("Creates a Project in an Organization -- mirrors POST /api/v1/organizations/{id}/projects. Needs ProjectWrite at Organization scope (Owner, Admin or ProjectAdmin there).")]
     public static async Task<ProjectResponse> AdminProjectCreateAsync(
         [Description("Organization id")] Guid organizationId,
         [Description("Project name, unique in the organization")] string name,
@@ -173,7 +173,7 @@ public sealed class VaultTools
     }
 
     [McpServerTool(Name = "admin.environment.create")]
-    [Description("Creates an Environment in a Project -- mirrors POST /api/v1/projects/{id}/environments. Needs EnvironmentWrite at the project (Owner/Admin/ProjectAdmin there, or the Provisioner that created it).")]
+    [Description("Creates an Environment in a Project -- mirrors POST /api/v1/projects/{id}/environments. Needs EnvironmentWrite at the project (Owner/Admin/ProjectAdmin at the project or its organization).")]
     public static async Task<EnvironmentResponse> AdminEnvironmentCreateAsync(
         [Description("Project id")] Guid projectId,
         [Description("Environment kind: Development, Staging, Production or Shared")] string name,
@@ -601,7 +601,7 @@ public sealed class VaultTools
     [Description("Grants a role to an identity (a User or ServiceAccount id) at a scope (Organization/Project/Environment). RBAC gated by RoleAssignmentWrite (Owner/Admin) at that scope. Idempotent for the same (identity, role, scope).")]
     public static async Task<object> AdminRoleGrantAsync(
         [Description("Identity to grant the role to (a User or ServiceAccount id)")] Guid identityId,
-        [Description("Role name: Owner, Admin, SecurityAdmin, ProjectAdmin, Developer, Operator, Auditor, ReadOnly, Agent, ServiceAccount, Provisioner")] string role,
+        [Description("Role name: Owner, Admin, SecurityAdmin, ProjectAdmin, Developer, Operator, Auditor, ReadOnly, Agent, ServiceAccount")] string role,
         [Description("Scope type: Organization, Project, or Environment")] string scopeType,
         [Description("Id of the Organization/Project/Environment matching scopeType")] Guid scopeId,
         ForgeVaultDbContext db,
