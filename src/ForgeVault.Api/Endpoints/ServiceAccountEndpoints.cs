@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ForgeVault.Api.Auditing;
 using ForgeVault.Application.Authorization;
 using ForgeVault.Domain.Entities;
@@ -99,6 +100,28 @@ public static class ServiceAccountEndpoints
             return Results.Ok(new ServiceAccountTokenResponse(rawToken, token.TokenPrefix, token.IssuedAt));
         });
 
+        // Rename keeps id, tokens and grants (2026-10-27, Marcelo: standard identity names
+        // agent:<nome> / service:<nome>); same authorization as minting a token.
+        group.MapPatch("/{id:guid}", async (
+            Guid id,
+            RenameServiceAccountRequest request,
+            ForgeVaultDbContext db,
+            IPermissionChecker permissions,
+            ClaimsPrincipal user,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            var (account, error) = await RenameAsync(db, permissions, id, request.Name, user.GetUserId(), user.GetActorType(), http.TraceIdentifier, ct);
+            return error switch
+            {
+                null => Results.Ok(ToResponse(account!)),
+                "service_account_not_found" => Results.NotFound(),
+                "forbidden" => Results.Forbid(),
+                "service_account_name_taken" => Results.Conflict(new ErrorResponse(error)),
+                _ => Results.BadRequest(new ErrorResponse(error)),
+            };
+        });
+
         // Revoking is allowed to in-scope identity admins and to the account itself (an identity
         // can always retire its own tokens); never to an unrelated identity.
         group.MapPost("/{id:guid}/tokens/{tokenId:guid}/revoke", async (
@@ -196,11 +219,59 @@ public static class ServiceAccountEndpoints
         });
     }
 
-    private static ServiceAccountResponse ToResponse(ServiceAccount account) => new(
+    internal static ServiceAccountResponse ToResponse(ServiceAccount account) => new(
         account.Id, account.Name, account.IsActive, account.CreatedAt);
 
     // A token grants the account's roles, direct secret grants and MCP assignments.
     // The caller must administer every active scope those access paths reach.
+    // Standard identity names: agent:<nome> for agents, service:<nome> for systems.
+    internal static readonly Regex StandardName = new("^(agent|service):[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant);
+
+    internal static async Task<(ServiceAccount? Account, string? Error)> RenameAsync(
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        Guid accountId,
+        string name,
+        Guid callerId,
+        AuditActorType callerType,
+        string requestId,
+        CancellationToken ct)
+    {
+        var account = await db.ServiceAccounts.FindAsync([accountId], ct);
+        if (account is null)
+        {
+            return (null, "service_account_not_found");
+        }
+
+        if (!await CanManageAccountAsync(db, permissions, callerId, accountId, ct))
+        {
+            return (null, "forbidden");
+        }
+
+        if (name.Length > 100 || !StandardName.IsMatch(name))
+        {
+            return (null, "invalid_name");
+        }
+
+        if (account.Name == name)
+        {
+            return (account, null);
+        }
+
+        if (await db.ServiceAccounts.AnyAsync(s => s.Name == name, ct))
+        {
+            return (null, "service_account_name_taken");
+        }
+
+        var previous = account.Name;
+        account.Name = name;
+        db.AuditLogs.Add(AuditLogFactory.Create(
+            callerId, callerType, "SERVICE_ACCOUNT_RENAME", "service_account", account.Id, requestId,
+            JsonSerializer.Serialize(new { from = previous, to = name })));
+        await db.SaveChangesAsync(ct);
+        return (account, null);
+    }
+
     private static async Task<bool> CanManageAccountAsync(
         ForgeVaultDbContext db, IPermissionChecker permissions, Guid callerId, Guid accountId, CancellationToken ct)
     {
@@ -289,6 +360,8 @@ public static class ServiceAccountEndpoints
 }
 
 public sealed record CreateServiceAccountRequest(string Name);
+
+public sealed record RenameServiceAccountRequest(string Name);
 
 public sealed record ServiceAccountResponse(Guid Id, string Name, bool IsActive, DateTimeOffset CreatedAt);
 

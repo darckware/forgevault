@@ -29,7 +29,7 @@ public sealed class McpToolsTests(IsolatedWebApplicationFactory factory) : IClas
         Assert.Equal(
             new[]
             {
-                "admin.agent.register", "admin.audit.search", "admin.environment.create", "admin.mcp.assign", "admin.mcp.register",
+                "admin.agent.register", "admin.agent.rename", "admin.audit.search", "admin.environment.create", "admin.mcp.assign", "admin.mcp.register",
                 "admin.mcp.revoke_assignment", "admin.project.create", "admin.role.grant", "admin.role.revoke",
                 "admin.secret.create", "admin.secret.grant_access", "admin.secret.impact", "admin.secret.revoke",
                 "admin.secret.revoke_access", "admin.secret.rotate", "admin.secret.update",
@@ -77,6 +77,57 @@ public sealed class McpToolsTests(IsolatedWebApplicationFactory factory) : IClas
         Assert.True(await db.AuditLogs.AnyAsync(a => a.ResourceId == projectId && a.Action == "PROJECT_CREATE"));
         Assert.True(await db.AuditLogs.AnyAsync(a => a.ResourceId == environmentId && a.Action == "ENVIRONMENT_CREATE"));
         Assert.False(await db.RoleAssignments.AnyAsync(r => r.ScopeType == RoleScopeType.Project && r.ScopeId == projectId));
+    }
+
+    [Fact]
+    public async Task AdminAgentRename_KeepsTokenAndGrants_EnforcesStandardName_AndAudits()
+    {
+        var (owner, ownerId) = await CreateAuthenticatedClientAsync();
+        var environmentId = await CreateOrgProjectEnvironmentAsync(owner, ownerId);
+        var (_, registerText) = await CallToolAsync(owner, "admin.agent.register", new { name = $"legacy-{Guid.NewGuid():N}", scopeType = "Environment", scopeId = environmentId });
+        var registration = JsonDocument.Parse(registerText!).RootElement;
+        var accountId = registration.GetProperty("serviceAccountId").GetGuid();
+        var oldName = registration.GetProperty("name").GetString();
+        var agentToken = registration.GetProperty("token").GetString();
+        var newName = $"agent:porthus-{Guid.NewGuid():N}"[..30];
+
+        foreach (var bad in new[] { "porthus", "Agent:Porthus", "agent:", "agent:por thus", "bot:porthus" })
+        {
+            var (badIsError, badText) = await CallToolAsync(owner, "admin.agent.rename", new { serviceAccountId = accountId, name = bad });
+            Assert.True(badIsError, bad);
+            Assert.Contains("invalid_name", badText, StringComparison.Ordinal);
+        }
+
+        var (stranger, _) = await CreateAuthenticatedClientAsync();
+        var (strangerIsError, strangerText) = await CallToolAsync(stranger, "admin.agent.rename", new { serviceAccountId = accountId, name = newName });
+        Assert.True(strangerIsError);
+        Assert.Contains("forbidden", strangerText, StringComparison.Ordinal);
+
+        var (renameIsError, renameText) = await CallToolAsync(owner, "admin.agent.rename", new { serviceAccountId = accountId, name = newName });
+        Assert.False(renameIsError, renameText);
+        Assert.Equal(newName, JsonDocument.Parse(renameText!).RootElement.GetProperty("name").GetString());
+
+        var (_, otherText) = await CallToolAsync(owner, "admin.agent.register", new { name = $"other-{Guid.NewGuid():N}", scopeType = "Environment", scopeId = environmentId });
+        var otherId = JsonDocument.Parse(otherText!).RootElement.GetProperty("serviceAccountId").GetGuid();
+        var (takenIsError, takenText) = await CallToolAsync(owner, "admin.agent.rename", new { serviceAccountId = otherId, name = newName });
+        Assert.True(takenIsError);
+        Assert.Contains("service_account_name_taken", takenText, StringComparison.Ordinal);
+
+        // Same token, same grants after the rename.
+        var agent = factory.CreateClient();
+        agent.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", agentToken);
+        var (createIsError, createText) = await CallToolAsync(agent, "admin.secret.create", new { environmentId, name = "AFTER_RENAME", type = "ApiKey", value = "v" });
+        Assert.False(createIsError, createText);
+
+        var rest = await owner.PatchAsJsonAsync($"/api/v1/service-accounts/{accountId}", new { name = "service:invalid name" });
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, rest.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ForgeVaultDbContext>();
+        var log = await db.AuditLogs.SingleAsync(a => a.ResourceId == accountId && a.Action == "SERVICE_ACCOUNT_RENAME");
+        Assert.Contains(oldName!, log.Metadata, StringComparison.Ordinal);
+        Assert.Contains(newName, log.Metadata, StringComparison.Ordinal);
+        Assert.DoesNotContain(agentToken!, log.Metadata, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -758,6 +758,21 @@ public sealed class VaultTools
         };
     }
 
+    [McpServerTool(Name = "admin.agent.rename")]
+    [Description("Renames a ServiceAccount to the standard name agent:<nome> (agents) or service:<nome> (systems), e.g. agent:porthus. Keeps id, tokens and every grant. Same authorization as issuing it a token (UserManage in every scope it holds). Audited as SERVICE_ACCOUNT_RENAME with the old and new names.")]
+    public static async Task<ServiceAccountResponse> AdminAgentRenameAsync(
+        [Description("ServiceAccount id")] Guid serviceAccountId,
+        [Description("New name: agent:<nome> or service:<nome>, lowercase letters, digits and hyphens")] string name,
+        ForgeVaultDbContext db,
+        IPermissionChecker permissions,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var (account, error) = await ServiceAccountEndpoints.RenameAsync(
+            db, permissions, serviceAccountId, name, user.GetUserId(), user.GetActorType(), NewRequestId(), ct);
+        return account is null ? throw new McpException(error!) : ServiceAccountEndpoints.ToResponse(account);
+    }
+
     private static (Role Role, RoleScopeType ScopeType) ParseRoleAndScopeTypeOrThrow(string role, string scopeType)
     {
         if (!Enum.TryParse<Role>(role, ignoreCase: true, out var parsedRole))
