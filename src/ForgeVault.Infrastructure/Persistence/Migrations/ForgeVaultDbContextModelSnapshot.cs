@@ -490,6 +490,12 @@ namespace ForgeVault.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("provider");
 
+                    b.Property<bool>("Restricted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("restricted");
+
                     b.Property<Guid?>("RotationPolicyId")
                         .HasColumnType("uuid")
                         .HasColumnName("rotation_policy_id");

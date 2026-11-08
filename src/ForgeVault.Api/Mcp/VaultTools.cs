@@ -151,7 +151,9 @@ public sealed class VaultTools
             throw new McpException("secret_not_found");
         }
 
-        var allowed = await permissions.HasPermissionAsync(user.GetUserId(), parsedPermission, resolved.Value.Scope, ct);
+        var allowed = parsedPermission == Permission.SecretReadValue
+            ? await SecretAccessAuthorizer.CanReadValueAsync(db, permissions, user.GetUserId(), secretId, resolved.Value.Scope, ct)
+            : await permissions.HasPermissionAsync(user.GetUserId(), parsedPermission, resolved.Value.Scope, ct);
         return new { allowed };
     }
 
@@ -331,6 +333,19 @@ public sealed class VaultTools
         db.AuditLogs.Add(AuditLogFactory.Create(actorId, user.GetActorType(), "SECRET_UPDATE", "secret", secret.Id, NewRequestId()));
         await db.SaveChangesAsync(ct);
 
+        return SecretScopeResolver.ToMetadataResponse(secret);
+    }
+
+    [McpServerTool(Name = "admin.secret.set_restriction")]
+    [Description("Changes the explicit-grant-only value policy. Audited; SecretWrite required. Metadata remains visible.")]
+    public static async Task<SecretResponse> AdminSecretSetRestrictionAsync(
+        Guid secretId, bool restricted, ForgeVaultDbContext db, IPermissionChecker permissions,
+        ClaimsPrincipal user, CancellationToken ct)
+    {
+        var (secret, scope) = await ResolveOrThrowAsync(db, secretId, ct);
+        if (!await permissions.HasPermissionAsync(user.GetUserId(), Permission.SecretWrite, scope, ct))
+            throw new McpException("forbidden");
+        await SecretRestriction.ChangeAsync(db, secret, restricted, user.GetUserId(), user.GetActorType(), NewRequestId(), ct);
         return SecretScopeResolver.ToMetadataResponse(secret);
     }
 

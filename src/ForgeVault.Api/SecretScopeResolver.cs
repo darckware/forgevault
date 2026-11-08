@@ -40,5 +40,6 @@ internal static class SecretScopeResolver
         secret.CurrentVersion,
         secret.CreatedAt,
         secret.UpdatedAt,
-        secret.ExpiresAt);
+        secret.ExpiresAt,
+        secret.Restricted);
 }

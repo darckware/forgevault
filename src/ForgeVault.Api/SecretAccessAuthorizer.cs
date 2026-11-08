@@ -12,20 +12,24 @@ namespace ForgeVault.Api;
 // uses for self-render (McpAssignmentRenderer: "self-render trusts the assignment"),
 // generalized here so it also works against GET /secrets/{id}/value directly, not only MCP
 // config rendering. Shared by SecretEndpoints (REST) and VaultTools (MCP) so the two
-// surfaces never diverge on who is allowed to read a value.
+// surfaces never diverge on who is allowed to read a value. Restricted secrets
+// ignore all roles (including Owner/Admin) and require an active per-secret grant.
 internal static class SecretAccessAuthorizer
 {
     public static async Task<bool> CanReadMetadataAsync(
         ForgeVaultDbContext db, IPermissionChecker permissions, Guid identityId, Guid secretId, ResourceScope scope, CancellationToken ct)
     {
         return await permissions.HasPermissionAsync(identityId, Permission.SecretWrite, scope, ct) ||
+            await permissions.HasPermissionAsync(identityId, Permission.SecretReadValue, scope, ct) ||
             await CanReadValueAsync(db, permissions, identityId, secretId, scope, ct);
     }
 
     public static async Task<bool> CanReadValueAsync(
         ForgeVaultDbContext db, IPermissionChecker permissions, Guid identityId, Guid secretId, ResourceScope scope, CancellationToken ct)
     {
-        if (await permissions.HasPermissionAsync(identityId, Permission.SecretReadValue, scope, ct))
+        var restricted = await db.Secrets.Where(s => s.Id == secretId).Select(s => (bool?)s.Restricted).SingleOrDefaultAsync(ct);
+        if (restricted is null) return false;
+        if (restricted == false && await permissions.HasPermissionAsync(identityId, Permission.SecretReadValue, scope, ct))
         {
             return true;
         }

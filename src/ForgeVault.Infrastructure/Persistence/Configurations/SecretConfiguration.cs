@@ -22,6 +22,8 @@ public sealed class SecretConfiguration : IEntityTypeConfiguration<Secret>
         builder.Property(s => s.Description).HasMaxLength(2000);
         builder.Property(s => s.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
 
+        builder.Property(s => s.Restricted).HasDefaultValue(false).IsRequired();
+
         builder.Property(s => s.CreatedAt).IsRequired();
         builder.Property(s => s.UpdatedAt).IsRequired();
 

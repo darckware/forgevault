@@ -112,8 +112,10 @@ internal static class McpAssignmentRenderer
             // Self-render trusts the assignment (an Owner/Admin with McpRegistryWrite already
             // decided this identity should have this value when creating it); rendering on
             // someone else's behalf still requires holding SecretReadValue on every
-            // referenced secret, same as credential.request.
-            if (!isSelf && !await permissions.HasPermissionAsync(callerId, Permission.SecretReadValue, scope, ct))
+            // referenced secret, same as credential.request. Restricted secrets always
+            // require an explicit grant, including when rendering one's own assignment.
+            if ((secret.Restricted || !isSelf) &&
+                !await SecretAccessAuthorizer.CanReadValueAsync(db, permissions, callerId, secretId, scope, ct))
             {
                 db.AuditLogs.Add(AuditLogFactory.Create(
                     callerId, callerType, "FAILED_ACCESS", "secret", secretId, requestId,

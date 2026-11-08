@@ -32,7 +32,7 @@ public sealed class McpToolsTests(IsolatedWebApplicationFactory factory) : IClas
                 "admin.agent.register", "admin.agent.rename", "admin.audit.search", "admin.environment.create", "admin.mcp.assign", "admin.mcp.register",
                 "admin.mcp.revoke_assignment", "admin.project.create", "admin.role.grant", "admin.role.revoke",
                 "admin.secret.create", "admin.secret.grant_access", "admin.secret.impact", "admin.secret.revoke",
-                "admin.secret.revoke_access", "admin.secret.rotate", "admin.secret.update",
+                "admin.secret.revoke_access", "admin.secret.rotate", "admin.secret.set_restriction", "admin.secret.update",
                 "capability.check", "credential.request", "mcp.render_config", "secret.metadata",
             },
             names.OrderBy(n => n, StringComparer.Ordinal));

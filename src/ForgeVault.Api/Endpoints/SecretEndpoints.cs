@@ -124,6 +124,19 @@ public static class SecretEndpoints
             return Results.Ok(secrets.Select(SecretScopeResolver.ToMetadataResponse));
         });
 
+        group.MapPut("/{id:guid}/restriction", async (
+            Guid id, SetSecretRestrictionRequest request, ForgeVaultDbContext db,
+            IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
+        {
+            var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
+            if (resolved is null) return Results.NotFound();
+            var (secret, scope) = resolved.Value;
+            if (!await permissions.HasPermissionAsync(user.GetUserId(), Permission.SecretWrite, scope, ct))
+                return Results.Forbid();
+            await SecretRestriction.ChangeAsync(db, secret, request.Restricted, user.GetUserId(), user.GetActorType(), http.TraceIdentifier, ct);
+            return Results.Ok(SecretScopeResolver.ToMetadataResponse(secret));
+        });
+
         group.MapGet("/{id:guid}", async (Guid id, ForgeVaultDbContext db, IPermissionChecker permissions, ClaimsPrincipal user, HttpContext http, CancellationToken ct) =>
         {
             var resolved = await SecretScopeResolver.ResolveWithScopeAsync(db, id, ct);
@@ -545,7 +558,10 @@ public sealed record SecretResponse(
     int CurrentVersion,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt,
+    bool Restricted = false);
+
+public sealed record SetSecretRestrictionRequest(bool Restricted);
 
 public sealed record SecretVersionResponse(Guid Id, int Version, string Algorithm, Guid CreatedBy, DateTimeOffset CreatedAt);
 

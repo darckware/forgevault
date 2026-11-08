@@ -43,6 +43,7 @@ public sealed class Secret
     public string? Description { get; set; }
     public Guid OwnerId { get; set; }
     public SecretStatus Status { get; set; } = SecretStatus.Active;
+    public bool Restricted { get; set; }
     public int CurrentVersion { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
