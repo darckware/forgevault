@@ -38,3 +38,6 @@ Thumbs.db
 
 # Claude Code local session artifacts
 .claude/
+
+# Python helper cache
+__pycache__/

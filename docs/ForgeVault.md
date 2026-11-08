@@ -4035,3 +4035,10 @@ Aplicações de clientes
 > **ForgeVault é o Security Plane da Darckware: uma plataforma centralizada de identidade, secrets, credenciais, políticas, sessões, leases, revogação, rotação, auditoria e intermediação de acesso para humanos, agentes, sistemas e máquinas.**
 
 O ForgeVault deve permitir que cada componente do ecossistema opere com identidade própria e privilégio mínimo, mantendo credenciais centralizadas, criptografadas, versionadas, rotacionáveis e auditáveis.
+
+## Restricted secret values
+
+The implemented explicit-grant-only policy, audited restriction API, remaining writer
+powers, value-path audit, activation/rollback procedure and proposed skill text are in
+[RESTRICTED_SECRETS.md](RESTRICTED_SECRETS.md). The default is false; production activation
+is a separate operator step after publishing the migration and application together.
