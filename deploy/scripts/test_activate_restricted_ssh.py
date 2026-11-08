@@ -61,6 +61,23 @@ class State:
 
 
 class ActivationTests(unittest.TestCase):
+    def test_explicit_active_inventory_count_after_key_retirement(self):
+        state = State()
+        retired = state.entries.pop()["id"]
+        count = activate(*(state.client(who) for who in ("manager", "consumer", "denied")),
+                         state.manifest(), expected_count=7)
+        self.assertEqual(7, count)
+        self.assertNotIn(retired, state.grants)
+        self.assertFalse(state.restricted[retired])
+        self.assertTrue(all(state.restricted[e["id"]] for e in state.entries))
+        with self.assertRaises(ActivationError):
+            manifest_validated(state.manifest())
+
+    def test_explicit_inventory_count_must_be_positive_and_exact(self):
+        for expected in (0, -1, 7, 9):
+            with self.assertRaises(ActivationError):
+                manifest_validated(State().manifest(), expected_count=expected)
+
     def test_success_idempotent_order_and_no_output(self):
         state = State()
         output = io.StringIO()

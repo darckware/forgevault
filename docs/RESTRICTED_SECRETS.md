@@ -85,6 +85,12 @@ Prepare an operator-owned JSON manifest containing no values/tokens:
 
 Supply exactly the eight approved key IDs/names. Offline validation:
 
+At publication on 2026-11-08, live metadata and ForgeHub machine references identify seven
+active keys: the former `srv-app05` key is revoked and unreferenced. Do not reactivate it.
+An operator may supply `--expected-key-count 7` to validation and activation after independently
+reconciling the manifest. The default remains eight; mismatched, empty and duplicate inventories
+are rejected before network mutations. Nine activation/rollback tests cover this option.
+
 ```sh
 python3 deploy/scripts/activate_restricted_ssh.py /secure/path/ssh-key-manifest.json
 ```
@@ -153,5 +159,7 @@ own operator-authorized publication step.
 The initial full run had one expected MCP tool-inventory assertion failure caused by the
 new tool; the inventory was updated and the final complete run passed. No production
 migration, deployment, credential read, activation, live bridge request or alert delivery
-was executed. ForgeHub proxy integration verification belongs to the companion ForgeHub
+was executed in the initial implementation session. Publication is recorded in the companion
+ForgeHub `docs/implementation/2026-11-08-remote-access-continuation.md` and its private release manifest.
+ForgeHub proxy integration verification belongs to the companion ForgeHub
 change; the API tests here verify its unchanged REST envelope contract with fake values.

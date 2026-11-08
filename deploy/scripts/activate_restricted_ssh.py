@@ -47,11 +47,11 @@ class Api:
             raise ActivationError("Invalid API JSON; response omitted") from None
 
 
-def manifest_validated(manifest):
+def manifest_validated(manifest, *, expected_count=8):
     identity = str(uuid.UUID(manifest["consumerIdentityId"]))
     entries = manifest["secrets"]
-    if len(entries) != 8:
-        raise ActivationError("Exactly eight SSH key entries are required")
+    if expected_count < 1 or len(entries) != expected_count:
+        raise ActivationError(f"Exactly {expected_count} SSH key entries are required")
     ids, names = set(), set()
     for entry in entries:
         entry["id"] = str(uuid.UUID(entry["id"]))
@@ -71,8 +71,8 @@ def verify_read(consumer, secret_id, consumer_id):
     # Value stays only in this short-lived process; never printed, hashed or persisted.
 
 
-def activate(manager, consumer, denied_admin, manifest):
-    consumer_id, entries = manifest_validated(manifest)
+def activate(manager, consumer, denied_admin, manifest, *, expected_count=8):
+    consumer_id, entries = manifest_validated(manifest, expected_count=expected_count)
     accounts = manager.call("GET", "/api/v1/service-accounts")
     if not any(a["id"] == consumer_id and a["name"] == "forgehub-remote-access" and a.get("isActive", True) for a in accounts):
         raise ActivationError("Consumer identity must be active forgehub-remote-access")
@@ -125,14 +125,16 @@ def activate(manager, consumer, denied_admin, manifest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("manifest", help="JSON consumerIdentityId and eight secrets [{id,name}]")
+    parser.add_argument("manifest", help="JSON consumerIdentityId and active secrets [{id,name}]")
+    parser.add_argument("--expected-key-count", type=int, default=8,
+                        help="Exact independently verified active inventory count (default: 8)")
     parser.add_argument("--url", default="http://127.0.0.1:8080")
     parser.add_argument("--apply", action="store_true", help="Perform activation; omit for offline manifest validation")
     args = parser.parse_args()
     try:
         with open(args.manifest, encoding="utf-8") as source:
             manifest = json.load(source)
-        manifest_validated(manifest)
+        manifest_validated(manifest, expected_count=args.expected_key_count)
         if not args.apply:
             print("Manifest valid. No network calls or changes. Use --apply during authorized publication.")
             return 0
@@ -144,7 +146,8 @@ def main():
         tokens = [os.environ[name] for name in ("FORGEVAULT_ACTIVATION_ADMIN_TOKEN", "FORGEVAULT_REMOTE_ACCESS_TOKEN", "FORGEVAULT_DENIED_ADMIN_TOKEN")]
         if any(not token for token in tokens) or tokens[1] in (tokens[0], tokens[2]):
             raise ActivationError("Distinct nonempty consumer and administrator tokens are required")
-        count = activate(*(Api(args.url, token) for token in tokens), manifest)
+        count = activate(*(Api(args.url, token) for token in tokens), manifest,
+                         expected_count=args.expected_key_count)
         print(f"Verified explicit consumer access and administrative denial for {count} restricted keys. No values emitted.")
         return 0
     except (ActivationError, KeyError, ValueError, OSError):
